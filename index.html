@@ -1,0 +1,3776 @@
+
+CLOUDINARY_CLOUD_NAME="[User Content]"
+CLOUDINARY_UPLOAD_PRESET="cmscontent"
+)
+# AI System
+
+## Current Implementation
+Enemy AI is lightweight and rule-based. Enemies chase the player when in range and otherwise wander in a simple pattern.
+
+## Behavior Design
+- Normal enemies: chase and attack when close
+- Elite enemies: stronger and more aggressive
+- Boss enemies: larger health pool and wider aggro range
+
+## Future Direction
+The AI system can be expanded with behavior states such as retreat, patrol, ambush, and phase-based boss logic.
+
+# Art Guide
+
+## Visual Direction
+Crystal Hunter uses a bold, neon, high-contrast style that fits a web-based fantasy action game.
+
+## Color Palette
+- Deep space blue background
+- Cyan and emerald highlights for crystals and friendly effects
+- Red and orange enemy tones
+- Gold for rewards and important UI elements
+
+## Visual Principles
+- Readable silhouettes
+- Strong separation between player, enemies, and objects
+- Clear feedback for impacts and rewards
+
+# Boss System
+
+## Current Boss Encounter
+The game includes a Warden boss encounter that appears on every fifth wave.
+
+## Boss Design Goals
+- High-impact encounter
+- Distinct visual identity
+- Rewarding kill state and progression feedback
+
+## Expansion Ideas
+Add phases, special attacks, and environmental hazards in future versions.
+
+# Bug Report
+
+## Current Known Issues
+- Placeholder image URLs may fail to load in the browser.
+- Audio requires user interaction to initialize in some browsers.
+- The project currently relies on local browser storage and may need migration support later.
+
+## Reporting Format
+- Describe the issue
+- Include browser and OS information
+- Note steps to reproduce
+- Record expected vs. actual behavior
+
+# Changelog
+
+## v2.1.0
+- Added a full documentation set for design, technical implementation, systems, QA, and project operations.
+- Added planning and reference documents for gameplay, UI, art, audio, security, and performance.
+- Expanded project guidance for installation, roadmap, and maintenance.
+
+## v2.0.0
+- Reworked the game into a fuller action RPG loop
+- Added mouse-based combat, skill attack, dash, stamina, combo, and invulnerability frames
+- Added weapon tiers, crystal rarity, boss encounters, quest progression, and improved HUD
+- Added autosave and enhanced local persistence
+
+# Coding Standard
+
+## Style
+- Prefer clear, readable JavaScript over clever abstractions.
+- Keep functions focused on single responsibilities.
+- Use consistent naming and indentation.
+
+## Game Development Rules
+- Keep state updates predictable and centralized.
+- Avoid breaking browser compatibility for simple use cases.
+- Preserve the single-file prototype structure unless a modular refactor is explicitly needed.
+
+## Documentation
+- Update documentation alongside major gameplay changes.
+- Keep docs concise and directly connected to the current implementation.
+
+# Combat System
+
+## Core Mechanics
+- Melee attack with mouse aim and combo scaling
+- Projectile shot for ranged pressure
+- Skill blast for area damage
+- Dash for mobility and evasion
+- Invulnerability and hit flash feedback
+
+## Combat Loop
+1. Player moves with keyboard or pointer input.
+2. Attacks damage nearby enemies.
+3. Projectiles and skill blasts apply extra pressure.
+4. Enemies retaliate and reduce HP.
+5. Defeated enemies grant gold, experience, and crystals.
+
+## Balance Notes
+Combat currently favors readability and momentum over deep tactical complexity.
+
+# Dungeon System
+
+## Current State
+A simple dungeon mode can be entered by pressing E. It currently creates a basic floor state and a secret chest reward.
+
+## Gameplay Role
+Dungeons serve as a short alternate mode that adds novelty and a sense of progression beyond the arena.
+
+## Future Improvements
+Add multiple room types, enemies, traps, and deeper progression.
+
+# Enemy System
+
+## Enemy Types
+- Normal enemies
+- Elite enemies
+- Boss enemies
+
+## Behavior
+Enemies detect the player, chase within range, and deal contact damage. Bosses have larger health pools and stronger attacks.
+
+## Rewards
+Enemies drop gold, experience, and occasional crystals when defeated.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter — Combat Test</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family:Segoe UI, sans-serif; background:#020617; color:#f8fafc; display:grid; place-items:center; min-height:100vh; }
+    .wrap { width:min(100%, 1100px); padding:16px; }
+    .story { margin-bottom:10px; padding:12px 14px; border-radius:12px; background:rgba(15,23,42,0.9); border:1px solid rgba(52,211,153,0.24); }
+    canvas { width:100%; height:auto; border:2px solid #38bdf8; background:#07111f; border-radius:12px; }
+    .controls { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    button { border:0; border-radius:8px; padding:8px 12px; background:#38bdf8; color:white; cursor:pointer; }
+    .hint { text-align:center; margin-top:8px; color:#cbd5e1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="story">
+      <strong>Crystal Hunter</strong>
+      <p>You are a wandering hunter crossing fractured realms to hunt crystal energy. Use light shots and upgrades to survive the wave.</p>
+    </div>
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="controls">
+      <button onclick="location.reload()">Reload</button>
+      <button onclick="alert('Move: WASD / Arrow Keys\nShoot: Space\nShop: P\nUpgrade: 1/2/3')">Help</button>
+    </div>
+    <div class="hint">เกมนี้ถูกเตรียมให้เล่นได้ทันทีในเว็บเบราว์เซอร์</div>
+  </div>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const state = { player:{x:120,y:120,size:24,hp:100,maxHp:100,gold:0,score:0,attackDamage:12,speed:4.5,projectileDamage:18,projectileSpeed:8,projectileCooldown:0,lastMove:{x:1,y:0}}, enemies:[], crystals:[], particles:[], projectiles:[], goldDrops:[], floatingTexts:[], wave:1, paused:false, shop:false };
+    const keys = {};
+    function rand(min,max){return Math.random()*(max-min)+min;}
+    function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+    function addText(x,y,text,color){ state.floatingTexts.push({x,y,text,color,life:70,vy:-0.8}); }
+    function createCrystal(){ return {x:rand(40,canvas.width-40), y:rand(60,canvas.height-40), size:16, pulse:rand(0,Math.PI*2), color:'#38bdf8'}; }
+    function createEnemy(){ return {x:rand(80,canvas.width-80), y:rand(90,canvas.height-80), size:24, hp:30, maxHp:30, speed:1.3, alive:true}; }
+    function spawnWave(){ state.enemies=[]; for(let i=0;i<4+state.wave;i++) state.enemies.push(createEnemy()); }
+    function spawnParticles(x,y,color,count=10){ for(let i=0;i<count;i++) state.particles.push({x,y,vx:rand(-2.8,2.8),vy:rand(-2.8,2.8),life:32,color}); }
+    function createProjectile(x,y,dir){ return {x,y,vx:dir.x*(state.player.projectileSpeed),vy:dir.y*(state.player.projectileSpeed),damage:state.player.projectileDamage,life:80,size:6,color:'#f8fafc'}; }
+    function spawnGoldDrop(x,y,value){ state.goldDrops.push({x,y,vx:rand(-0.5,0.5),vy:rand(-1.2,-0.4),life:420,value,size:8,pulse:rand(0,Math.PI*2)}); }
+    function applyDamage(enemy, amount){ enemy.hp -= amount; if(enemy.hp <= 0){ state.player.gold += 10; state.player.score += 20; addText(enemy.x,enemy.y,'+10','#34d399'); spawnGoldDrop(enemy.x,enemy.y,rand(5,15)); spawnParticles(enemy.x,enemy.y,'#22c55e',18); state.enemies.splice(state.enemies.indexOf(enemy),1); } }
+    function update(dt){ if(state.paused || state.shop) return; const moveX=(keys['ArrowRight']||keys['d']?1:0)-(keys['ArrowLeft']||keys['a']?1:0); const moveY=(keys['ArrowDown']||keys['s']?1:0)-(keys['ArrowUp']||keys['w']?1:0); const len=Math.hypot(moveX,moveY)||1; if(moveX||moveY){ state.player.lastMove={x:moveX/len,y:moveY/len}; state.player.x += (moveX/len)*state.player.speed; state.player.y += (moveY/len)*state.player.speed; }
+      state.player.x=clamp(state.player.x,0,canvas.width-state.player.size); state.player.y=clamp(state.player.y,0,canvas.height-state.player.size); state.player.projectileCooldown=Math.max(0,state.player.projectileCooldown-dt*0.001);
+      state.enemies.forEach(e=>{ const dx=state.player.x+state.player.size/2-(e.x+e.size/2); const dy=state.player.y+state.player.size/2-(e.y+e.size/2); const dist=Math.hypot(dx,dy)||1; e.x += (dx/dist)*e.speed; e.y += (dy/dist)*e.speed; if(Math.hypot(state.player.x-e.x,state.player.y-e.y)<24){ state.player.hp-=1; if(state.player.hp<=0){state.player.hp=100; state.player.gold=0; state.player.score=0;}}});
+      for(let i=state.crystals.length-1;i>=0;i--){ const c=state.crystals[i]; const dx=state.player.x+state.player.size/2-(c.x+c.size/2); const dy=state.player.y+state.player.size/2-(c.y+c.size/2); if(Math.hypot(dx,dy)<18){ state.player.gold+=10; state.player.score+=10; addText(c.x,c.y,'+10','#facc15'); state.crystals.splice(i,1); state.crystals.push(createCrystal()); }}
+      for(let i=state.projectiles.length-1;i>=0;i--){ const p=state.projectiles[i]; p.x+=p.vx; p.y+=p.vy; p.life-=dt; if(p.life<=0){ state.projectiles.splice(i,1); continue; } for(let j=state.enemies.length-1;j>=0;j--){ const e=state.enemies[j]; const dx=p.x-(e.x+e.size/2); const dy=p.y-(e.y+e.size/2); if(Math.hypot(dx,dy)<e.size/2+4){ applyDamage(e,p.damage); spawnParticles(p.x,p.y,'#f8fafc',6); state.projectiles.splice(i,1); break; } } }
+      for(let i=state.goldDrops.length-1;i>=0;i--){ const drop=state.goldDrops[i]; drop.x+=drop.vx; drop.y+=drop.vy; drop.life-=dt; drop.pulse+=0.08; const dx=state.player.x+state.player.size/2-(drop.x+drop.size/2); const dy=state.player.y+state.player.size/2-(drop.y+drop.size/2); if(Math.hypot(dx,dy)<state.player.size/2+drop.size/2){ state.player.gold+=drop.value; addText(drop.x,drop.y,`+${drop.value}`,'#facc15'); state.goldDrops.splice(i,1); continue; } if(drop.life<=0) state.goldDrops.splice(i,1); }
+      for(let i=state.floatingTexts.length-1;i>=0;i--){ const t=state.floatingTexts[i]; t.y += t.vy*dt*0.06; t.life-=dt; if(t.life<=0) state.floatingTexts.splice(i,1); }
+      for(let i=state.particles.length-1;i>=0;i--){ const p=state.particles[i]; p.x+=p.vx; p.y+=p.vy; p.life-=dt*0.06; if(p.life<=0) state.particles.splice(i,1); }
+      if((keys[' ']||keys['Space']) && state.player.projectileCooldown<=0){ state.player.projectileCooldown=0.2; state.projectiles.push(createProjectile(state.player.x+state.player.size/2,state.player.y+state.player.size/2,state.player.lastMove)); }
+      if(state.enemies.length===0){ state.wave+=1; spawnWave(); }
+    }
+    function buyUpgrade(id){ if(id==='speed' && state.player.gold>=100){ state.player.gold-=100; state.player.speed+=0.5; } if(id==='hp'&&state.player.gold>=150){ state.player.gold-=150; state.player.maxHp+=20; state.player.hp=Math.min(state.player.maxHp,state.player.hp+20); } if(id==='damage'&&state.player.gold>=200){ state.player.gold-=200; state.player.attackDamage+=5; state.player.projectileDamage+=5; } }
+    function draw(){ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#030712'; ctx.fillRect(0,0,canvas.width,canvas.height); state.crystals.forEach(c=>{ctx.save(); ctx.translate(c.x+c.size/2,c.y+c.size/2); ctx.scale(1+Math.sin(c.pulse)*0.05,1+Math.sin(c.pulse)*0.05); ctx.fillStyle=c.color; ctx.fillRect(-c.size/2,-c.size/2,c.size,c.size); ctx.restore(); c.pulse+=0.08;}); state.enemies.forEach(e=>{ ctx.fillStyle='#ef4444'; ctx.fillRect(e.x,e.y,e.size,e.size); }); state.projectiles.forEach(p=>{ ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill();}); state.goldDrops.forEach(drop=>{ctx.save(); ctx.translate(drop.x+drop.size/2,drop.y+drop.size/2); ctx.scale(1+Math.sin(drop.pulse)*0.08,1+Math.sin(drop.pulse)*0.08); ctx.fillStyle='#facc15'; ctx.beginPath(); ctx.arc(0,0,drop.size,0,Math.PI*2); ctx.fill(); ctx.restore();}); ctx.fillStyle='#22c55e'; ctx.fillRect(state.player.x,state.player.y,state.player.size,state.player.size); state.particles.forEach(p=>{ ctx.globalAlpha=Math.max(0,p.life/32); ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,3,3);}); ctx.globalAlpha=1; ctx.fillStyle='#f8fafc'; ctx.font='16px Segoe UI'; ctx.fillText(`HP ${state.player.hp}`, 16, 24); ctx.fillText(`Gold ${state.player.gold}`, 16, 46); ctx.fillText(`Wave ${state.wave}`, 16, 68); state.floatingTexts.forEach(t=>{ ctx.fillStyle=t.color; ctx.font='bold 14px Segoe UI'; ctx.fillText(t.text,t.x,t.y); }); if(state.shop){ ctx.fillStyle='rgba(2,6,23,0.92)'; ctx.fillRect(220,140,520,260); ctx.strokeStyle='#38bdf8'; ctx.strokeRect(220,140,520,260); ctx.fillStyle='#f8fafc'; ctx.font='bold 20px Segoe UI'; ctx.fillText('Upgrade Shop',240,178); ctx.font='16px Segoe UI'; ctx.fillText('1) +0.5 Speed • 100 Gold',240,214); ctx.fillText('2) +20 Max HP • 150 Gold',240,242); ctx.fillText('3) +5 Damage • 200 Gold',240,270); ctx.fillText('P = Close',240,298); }}
+    function loop(ts){ const dt=Math.min(32,ts-(loop.last||ts)); loop.last=ts; update(dt); draw(); requestAnimationFrame(loop); }
+    document.addEventListener('keydown', e=>{ const key=e.key.toLowerCase(); keys[key]=true; if(key==='escape') state.paused=!state.paused; if(key==='p') state.shop=!state.shop; if(key==='1'&&state.shop) buyUpgrade('speed'); if(key==='2'&&state.shop) buyUpgrade('hp'); if(key==='3'&&state.shop) buyUpgrade('damage'); });
+    document.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+    for(let i=0;i<6;i++) state.crystals.push(createCrystal()); spawnWave(); requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+
+# Game Design Document
+
+## Overview
+Crystal Hunter RPG is a top-down action experience where the player explores a fractured world, defeats enemies, collects crystals, and spends rewards on upgrades.
+
+## Core Loop
+1. Move through the arena or dungeon.
+2. Defeat waves of enemies.
+3. Collect crystals and gold.
+4. Spend gold on upgrades or cosmetics.
+5. Survive long enough to clear waves and reach boss encounters.
+
+## Player Fantasy
+The player is a wandering crystal hunter who grows stronger as they gather relic energy and uncover the secrets of the world.
+
+## Progression Systems
+- Experience and leveling
+- Stat upgrades for HP, speed, and damage
+- Weapon and skin progression
+- Quests and achievements
+
+## Economy
+- Gold earned from enemy kills and crystals
+- Crystals used as collectible rewards and inventory tracking
+- Shop purchases improve survivability and offense
+
+## Tone
+- Fast-paced and readable
+- Stylized, neon, high-contrast visuals
+- Lightweight fantasy with arcade feedback
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter RPG</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="game-shell">
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="hint">WASD / Arrows = Move • Left Click = Attack • Right Click = Skill • Shift = Dash • I = Inventory • B = Shop • E = Enter Dungeon • ESC = Pause</div>
+    <section class="vibe-panel" aria-label="Vibe Coding content">
+      <h2>AI Studio: Vibe Coding</h2>
+      <div class="vibe-grid">
+        <article>
+          <h3>Natural Language as Code</h3>
+          <p>Prompting AI with plain language turns intent into implementation, replacing brittle syntax drills with fast iteration.</p>
+        </article>
+        <article>
+          <h3>Agile Refinement & Rapid Iteration</h3>
+          <p>Each feedback loop sharpens the prompt, improves the output, and shortens the path from concept to playable experience.</p>
+        </article>
+        <article>
+          <h3>High-Level Orchestration</h3>
+          <p>The creator acts as a director: setting vision, constraints, and acceptance while the AI handles concrete execution.</p>
+        </article>
+        <article>
+          <h3>MDA + Generative AI</h3>
+          <p>Mechanics, dynamics, and aesthetics become a design framework for guiding AI-generated systems and tailoring experiences for different player types.</p>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const STORAGE_KEY = "crystal-hunter-rpg-v2";
+    const RARITY_DATA = [
+      { name: "common", label: "Common", color: "#38bdf8", value: 8, glow: "rgba(56,189,248,0.35)" },
+      { name: "rare", label: "Rare", color: "#4ade80", value: 16, glow: "rgba(74,222,128,0.35)" },
+      { name: "epic", label: "Epic", color: "#a855f7", value: 32, glow: "rgba(168,85,247,0.35)" },
+      { name: "legendary", label: "Legendary", color: "#facc15", value: 60, glow: "rgba(250,204,21,0.35)" },
+      { name: "mythic", label: "Mythic", color: "#fb7185", value: 100, glow: "rgba(251,113,133,0.35)" }
+    ];
+    const WEAPONS = [
+      { name: "Wood Sword", tier: "Common", damage: 12, speed: 0.9, crit: 0.08 },
+      { name: "Iron Sword", tier: "Rare", damage: 15, speed: 1.05, crit: 0.1 },
+      { name: "Steel Sword", tier: "Epic", damage: 19, speed: 1.15, crit: 0.12 },
+      { name: "Crystal Sword", tier: "Legendary", damage: 24, speed: 1.25, crit: 0.15 },
+      { name: "Dragon Sword", tier: "Mythic", damage: 30, speed: 1.35, crit: 0.18 }
+    ];
+    const SKINS = [
+      { id: "default", label: "Default", color: "#22c55e", cost: 0 },
+      { id: "emerald", label: "Emerald", color: "#34d399", cost: 120 },
+      { id: "ruby", label: "Ruby", color: "#fb7185", cost: 180 },
+      { id: "gold", label: "Gold", color: "#fbbf24", cost: 260 }
+    ];
+
+    const keyState = {};
+    const pointerState = { up: false, down: false, left: false, right: false, attack: false };
+    const mouse = { x: 0, y: 0 };
+    let lastTime = 0;
+    let audioCtx = null;
+    let musicGain = null;
+    let musicOsc = null;
+
+    function createPlayer() {
+      return {
+        x: 140,
+        y: 140,
+        size: 24,
+        speed: 4.2,
+        hp: 110,
+        maxHp: 110,
+        mana: 60,
+        maxMana: 60,
+        stamina: 100,
+        maxStamina: 100,
+        level: 1,
+        exp: 0,
+        expToNext: 100,
+        gold: 0,
+        score: 0,
+        attackDamage: 12,
+        attackRange: 84,
+        attackCooldown: 0,
+        attackCombo: 0,
+        dashCooldown: 0,
+        dashTimer: 0,
+        invincible: 0,
+        critChance: 0.08,
+        critDamage: 1.8,
+        defense: 0,
+        skin: "default",
+        weapon: { name: "Wood Sword", damage: 12, speed: 0.9, crit: 0.08 },
+        armor: { name: "Leather Armor", defense: 0 },
+        inventory: { common: 0, rare: 0, epic: 0, legendary: 0, mythic: 0, potion: 0, manaPotion: 0 },
+        upgrades: { hp: 0, speed: 0, damage: 0, armor: 0 },
+        skills: { blast: 0, dash: 0, shield: 0 },
+        stats: { crystals: 0, enemiesKilled: 0, damageDealt: 0, wavesCleared: 0, bossDefeats: 0, dungeonFloors: 0 },
+        achievements: { firstCrystal: false, firstWave: false, bossDefeated: false, dungeonClear: false },
+        questLog: []
+      };
+    }
+
+    function createDefaultState() {
+      return {
+        player: createPlayer(),
+        enemies: [],
+        crystals: [],
+        particles: [],
+        floatingTexts: [],
+        effects: [],
+        quests: [],
+        boss: null,
+        paused: false,
+        showShop: false,
+        showInventory: false,
+        mode: "arena",
+        wave: 1,
+        waveActive: false,
+        waveTimer: 0,
+        screenShake: 0,
+        hitFlash: 0,
+        dungeon: null,
+        highScore: 0,
+        lastSavedAt: 0,
+        autoSaveTimer: 30,
+        message: "A new adventure begins"
+      };
+    }
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+    function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return createDefaultState();
+        const parsed = JSON.parse(raw);
+        const next = createDefaultState();
+        if (parsed.player) {
+          next.player = { ...next.player, ...parsed.player };
+          next.player.inventory = { ...next.player.inventory, ...(parsed.player.inventory || {}) };
+          next.player.upgrades = { ...next.player.upgrades, ...(parsed.player.upgrades || {}) };
+          next.player.skills = { ...next.player.skills, ...(parsed.player.skills || {}) };
+          next.player.stats = { ...next.player.stats, ...(parsed.player.stats || {}) };
+          next.player.achievements = { ...next.player.achievements, ...(parsed.player.achievements || {}) };
+          next.player.weapon = { ...next.player.weapon, ...(parsed.player.weapon || {}) };
+          next.player.armor = { ...next.player.armor, ...(parsed.player.armor || {}) };
+          next.player.questLog = Array.isArray(parsed.player.questLog) ? parsed.player.questLog : [];
+          next.player.attackDamage = next.player.weapon.damage;
+        }
+        next.wave = parsed.wave || 1;
+        next.mode = parsed.mode || "arena";
+        next.paused = Boolean(parsed.paused);
+        next.showShop = Boolean(parsed.showShop);
+        next.showInventory = Boolean(parsed.showInventory);
+        next.waveActive = Boolean(parsed.waveActive);
+        next.dungeon = parsed.dungeon || null;
+        next.boss = parsed.boss || null;
+        next.highScore = Number(parsed.highScore || localStorage.getItem("crystal-hunter-highscore") || 0);
+        next.quests = Array.isArray(parsed.quests) ? parsed.quests : createQuests();
+        next.message = parsed.message || "New adventure started";
+        return next;
+      } catch (error) {
+        console.warn("Save load failed", error);
+        return createDefaultState();
+      }
+    }
+
+    const state = loadState();
+
+    function saveState() {
+      const payload = {
+        player: state.player,
+        wave: state.wave,
+        mode: state.mode,
+        paused: state.paused,
+        showShop: state.showShop,
+        showInventory: state.showInventory,
+        waveActive: state.waveActive,
+        dungeon: state.dungeon,
+        boss: state.boss,
+        highScore: state.highScore,
+        quests: state.quests,
+        message: state.message,
+        lastSavedAt: Date.now()
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem("crystal-hunter-highscore", String(state.highScore));
+      state.lastSavedAt = Date.now();
+    }
+
+    function createQuests() {
+      return [
+        { id: 1, type: "kill", title: "Clear the Hollow", target: 8, progress: 0, reward: 80, complete: false },
+        { id: 2, type: "collect", title: "Gather Crystals", target: 5, progress: 0, reward: 60, complete: false },
+        { id: 3, type: "boss", title: "Defeat the Warden", target: 1, progress: 0, reward: 120, complete: false }
+      ];
+    }
+
+    function resetRun() {
+      const fresh = createDefaultState();
+      fresh.highScore = state.highScore;
+      fresh.quests = createQuests();
+      Object.assign(state, fresh);
+      state.highScore = fresh.highScore;
+      state.quests = fresh.quests;
+      state.player.score = 0;
+      state.player.gold = 0;
+      state.player.attackDamage = state.player.weapon.damage;
+      spawnWave();
+      saveState();
+    }
+
+    function createCrystal() {
+      const roll = Math.random();
+      let rarity;
+      if (roll < 0.5) rarity = RARITY_DATA[0];
+      else if (roll < 0.8) rarity = RARITY_DATA[1];
+      else if (roll < 0.94) rarity = RARITY_DATA[2];
+      else if (roll < 0.985) rarity = RARITY_DATA[3];
+      else rarity = RARITY_DATA[4];
+      return {
+        x: randomRange(50, canvas.width - 50),
+        y: randomRange(70, canvas.height - 70),
+        size: 16,
+        rarity,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function createEnemy(kind = "normal") {
+      const maxHp = kind === "elite" ? 70 + state.wave * 8 : kind === "boss" ? 260 + state.wave * 25 : 40 + state.wave * 5;
+      const speed = kind === "elite" ? 2.4 + state.wave * 0.02 : kind === "boss" ? 1.4 : 1.8 + state.wave * 0.02;
+      const damage = kind === "elite" ? 8 + state.wave : kind === "boss" ? 16 + state.wave : 5 + Math.floor(state.wave / 2);
+      return {
+        x: randomRange(60, canvas.width - 60),
+        y: randomRange(90, canvas.height - 90),
+        size: kind === "boss" ? 42 : kind === "elite" ? 32 : 24,
+        speed,
+        hp: maxHp,
+        maxHp,
+        damage,
+        cooldown: 950,
+        lastHit: 0,
+        flash: 0,
+        alive: true,
+        kind,
+        state: "idle",
+        aggroRange: kind === "boss" ? 240 : 160,
+        attackRange: kind === "boss" ? 70 : 48,
+        wanderAngle: randomRange(0, Math.PI * 2),
+        wanderTimer: randomRange(0.6, 1.8)
+      };
+    }
+
+    function spawnWave() {
+      state.enemies = [];
+      const count = Math.min(16, 4 + Math.floor(state.wave * 1.9) + (state.wave % 5 === 0 ? 2 : 0));
+      const bossWave = state.wave % 5 === 0;
+      for (let i = 0; i < count; i++) {
+        const kind = bossWave && i === 0 ? "boss" : i % 7 === 0 ? "elite" : "normal";
+        state.enemies.push(createEnemy(kind));
+      }
+      state.waveActive = true;
+      state.waveTimer = 0;
+      addFloatingText(canvas.width / 2 - 80, 70, `Wave ${state.wave}`, "#fbbf24", 120);
+      playTone(660, 0.08, "triangle", 0.08);
+      saveState();
+    }
+
+    function addFloatingText(x, y, text, color, life = 80) {
+      state.floatingTexts.push({ x, y, text, color, life, vy: -0.7 });
+    }
+
+    function spawnParticles(x, y, color, count = 16) {
+      for (let i = 0; i < count; i++) {
+        state.particles.push({ x, y, vx: randomRange(-2.8, 2.8), vy: randomRange(-2.8, 2.8), life: 36, color });
+      }
+    }
+
+    function playTone(frequency, duration, type = "sine", volume = 0.04) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    }
+
+    function startMusic() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (musicGain) return;
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.01;
+      musicGain.connect(audioCtx.destination);
+      musicOsc = audioCtx.createOscillator();
+      musicOsc.type = "sine";
+      musicOsc.frequency.value = 220;
+      musicOsc.connect(musicGain);
+      musicOsc.start();
+    }
+
+    function getAimDirection() {
+      const px = state.player.x + state.player.size / 2;
+      const py = state.player.y + state.player.size / 2;
+      const dx = mouse.x - px;
+      const dy = mouse.y - py;
+      const dist = Math.hypot(dx, dy) || 1;
+      return { x: dx / dist, y: dy / dist };
+    }
+
+    function applyDamage(enemy, amount) {
+      enemy.hp -= amount;
+      enemy.flash = 0.2;
+      addFloatingText(enemy.x + 4, enemy.y - 4, `${Math.round(amount)}`, "#fda4af", 65);
+      if (enemy.hp <= 0) killEnemy(enemy);
+    }
+
+    function performAttack() {
+      if (state.paused || state.player.attackCooldown > 0) return;
+      state.player.attackCooldown = 240 - Math.min(80, state.player.level * 6);
+      const aim = getAimDirection();
+      const comboBonus = state.player.attackCombo % 3 === 0 ? 1.15 : 1;
+      state.player.attackCombo = (state.player.attackCombo + 1) % 4;
+      let damage = state.player.attackDamage * comboBonus;
+      const crit = Math.random() < state.player.critChance;
+      if (crit) damage *= state.player.critDamage;
+      state.player.stats.damageDealt += damage;
+      spawnParticles(state.player.x + 10, state.player.y + 10, crit ? "#fbbf24" : "#f8fafc", 10);
+      playTone(crit ? 1200 : 900, 0.05, "square", 0.06);
+      state.effects.push({ x: state.player.x + 4, y: state.player.y + 4, life: 10, color: crit ? "#fde68a" : "#e2e8f0" });
+      state.enemies.forEach((enemy) => {
+        const ex = enemy.x + enemy.size / 2;
+        const ey = enemy.y + enemy.size / 2;
+        const dx = ex - (state.player.x + state.player.size / 2 + aim.x * 20);
+        const dy = ey - (state.player.y + state.player.size / 2 + aim.y * 20);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.attackRange + enemy.size / 2) {
+          applyDamage(enemy, damage);
+        }
+      });
+      state.hitFlash = 0.14;
+      state.screenShake = 0.16;
+      saveState();
+    }
+
+    function performSkill() {
+      if (state.paused || state.player.mana < 14) return;
+      state.player.mana = Math.max(0, state.player.mana - 14);
+      const damage = 20 + state.player.level * 3 + state.player.skills.blast * 6;
+      const aim = getAimDirection();
+      state.effects.push({ x: state.player.x - 10, y: state.player.y - 10, life: 18, color: "#38bdf8" });
+      spawnParticles(state.player.x + 10, state.player.y + 10, "#38bdf8", 24);
+      state.enemies.forEach((enemy) => {
+        const dx = enemy.x + enemy.size / 2 - (state.player.x + state.player.size / 2 + aim.x * 40);
+        const dy = enemy.y + enemy.size / 2 - (state.player.y + state.player.size / 2 + aim.y * 40);
+        const dist = Math.hypot(dx, dy);
+        if (dist < 140 + state.player.level * 8) {
+          applyDamage(enemy, damage);
+        }
+      });
+      playTone(540, 0.08, "triangle", 0.08);
+      saveState();
+    }
+
+    function levelUp() {
+      state.player.level += 1;
+      state.player.exp = 0;
+      state.player.expToNext = Math.round(state.player.expToNext * 1.18);
+      state.player.maxHp += 10;
+      state.player.maxMana += 8;
+      state.player.maxStamina += 8;
+      state.player.hp = state.player.maxHp;
+      state.player.mana = state.player.maxMana;
+      state.player.stamina = state.player.maxStamina;
+      state.player.attackDamage += 2;
+      state.player.weapon.damage = state.player.attackDamage;
+      state.player.upgrades.hp += 1;
+      addFloatingText(110, 132, `Level ${state.player.level}`, "#fbbf24", 110);
+      spawnParticles(120, 120, "#fbbf24", 40);
+      playTone(740, 0.12, "triangle", 0.08);
+      saveState();
+    }
+
+    function killEnemy(enemy) {
+      enemy.alive = false;
+      state.player.stats.enemiesKilled += 1;
+      state.player.stats.crystals += 1;
+      state.player.gold += 10 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 60 : 0);
+      state.player.score += 25 + (enemy.kind === "elite" ? 40 : 0) + (enemy.kind === "boss" ? 140 : 0);
+      state.player.exp += 18 + (enemy.kind === "elite" ? 24 : 0) + (enemy.kind === "boss" ? 45 : 0);
+      state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1.6);
+      state.player.mana = Math.min(state.player.maxMana, state.player.mana + 2.6);
+      state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 6);
+      if (state.player.exp >= state.player.expToNext) levelUp();
+      addFloatingText(enemy.x, enemy.y - 8, "+Gold", "#34d399", 70);
+      spawnParticles(enemy.x, enemy.y, enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#22c55e", enemy.kind === "boss" ? 48 : 18);
+      if (Math.random() < 0.2) {
+        const crystal = createCrystal();
+        crystal.x = enemy.x;
+        crystal.y = enemy.y;
+        state.crystals.push(crystal);
+      }
+      if (enemy.kind === "boss") {
+        state.player.achievements.bossDefeated = true;
+        state.player.stats.bossDefeats += 1;
+        state.message = "The Warden has fallen";
+        addFloatingText(140, 160, "Boss Defeated", "#fbbf24", 120);
+      }
+      updateQuests(enemy.kind === "boss" ? "boss" : "kill");
+      playTone(440, 0.06, "sawtooth", 0.05);
+      saveState();
+    }
+
+    function updateQuests(type) {
+      state.quests.forEach((quest) => {
+        if (quest.complete) return;
+        if (type === "kill" && quest.type === "kill") {
+          quest.progress += 1;
+        } else if (type === "collect" && quest.type === "collect") {
+          quest.progress += 1;
+        } else if (type === "boss" && quest.type === "boss") {
+          quest.progress += 1;
+        }
+        if (quest.progress >= quest.target) {
+          quest.complete = true;
+          state.player.gold += quest.reward;
+          state.message = `${quest.title} complete`;
+          addFloatingText(140, 190, `${quest.title} Complete`, "#34d399", 110);
+        }
+      });
+    }
+
+    function handleInput(delta) {
+      const moveX = (keyState["arrowright"] || keyState["d"] || pointerState.right ? 1 : 0) - (keyState["arrowleft"] || keyState["a"] || pointerState.left ? 1 : 0);
+      const moveY = (keyState["arrowdown"] || keyState["s"] || pointerState.down ? 1 : 0) - (keyState["arrowup"] || keyState["w"] || pointerState.up ? 1 : 0);
+      const len = Math.hypot(moveX, moveY) || 1;
+      const inputVector = { x: moveX / len, y: moveY / len };
+      if (moveX || moveY) {
+        const speedFactor = keyState["shift"] && state.player.stamina > 10 ? 1.5 : 1;
+        if (keyState["shift"] && state.player.stamina > 10) {
+          state.player.stamina = Math.max(0, state.player.stamina - 8);
+        } else {
+          state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.35);
+        }
+        state.player.x += inputVector.x * state.player.speed * speedFactor;
+        state.player.y += inputVector.y * state.player.speed * speedFactor;
+      } else {
+        state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.45);
+      }
+      state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
+      state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
+      state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
+      state.player.dashCooldown = Math.max(0, state.player.dashCooldown - delta * 0.001);
+      state.player.invincible = Math.max(0, state.player.invincible - delta * 0.001);
+      state.hitFlash = Math.max(0, state.hitFlash - delta * 0.001);
+      state.screenShake = Math.max(0, state.screenShake - delta * 0.001);
+      if (keyState["shift"] && state.player.dashCooldown <= 0 && (moveX || moveY) && !state.paused) {
+        state.player.dashCooldown = 700;
+        state.player.dashTimer = 110;
+        state.player.speed = 5.8;
+        state.player.skills.dash += 1;
+        playTone(600, 0.04, "square", 0.05);
+        addFloatingText(state.player.x, state.player.y - 8, "Dash", "#fbbf24", 50);
+      }
+      if (state.player.dashTimer > 0) {
+        state.player.dashTimer -= delta;
+        if (state.player.dashTimer <= 0) state.player.speed = 4.2;
+      }
+      if ((keyState[" "] || keyState["space"] || pointerState.attack) && !state.paused) performAttack();
+      if (keyState["e"] && !state.paused) enterDungeon();
+    }
+
+    function updateParticles(delta) {
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= delta * 0.06;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+        const t = state.floatingTexts[i];
+        t.y += t.vy * delta * 0.06;
+        t.life -= delta;
+        if (t.life <= 0) state.floatingTexts.splice(i, 1);
+      }
+    }
+
+    function updateEffects(delta) {
+      for (let i = state.effects.length - 1; i >= 0; i--) {
+        const effect = state.effects[i];
+        effect.life -= delta * 0.06;
+        if (effect.life <= 0) state.effects.splice(i, 1);
+      }
+    }
+
+    function updateCrystals() {
+      for (let i = state.crystals.length - 1; i >= 0; i--) {
+        const crystal = state.crystals[i];
+        crystal.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (crystal.x + crystal.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (crystal.y + crystal.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + crystal.size / 2) {
+          const reward = crystal.rarity.value;
+          state.player.gold += reward;
+          state.player.score += reward;
+          state.player.inventory[crystal.rarity.name] += 1;
+          state.player.stats.crystals += 1;
+          state.player.achievements.firstCrystal = true;
+          updateQuests("collect");
+          addFloatingText(crystal.x, crystal.y - 6, `+${reward} Gold`, crystal.rarity.color, 70);
+          spawnParticles(crystal.x, crystal.y, crystal.rarity.color, 20);
+          playTone(580, 0.06, "triangle", 0.05);
+          state.crystals.splice(i, 1);
+          state.crystals.push(createCrystal());
+          saveState();
+        }
+      }
+    }
+
+    function updateEnemyAI(enemy, delta) {
+      const px = state.player.x + state.player.size / 2;
+      const py = state.player.y + state.player.size / 2;
+      const ex = enemy.x + enemy.size / 2;
+      const ey = enemy.y + enemy.size / 2;
+      const dist = Math.hypot(px - ex, py - ey);
+      const shouldChase = enemy.kind === "boss" ? dist < enemy.aggroRange : dist < enemy.aggroRange - 30 + state.wave * 8;
+      enemy.state = shouldChase ? "chase" : "wander";
+      if (enemy.state === "chase") {
+        const dx = px - ex;
+        const dy = py - ey;
+        const length = Math.hypot(dx, dy) || 1;
+        const chaseSpeed = enemy.speed + (enemy.kind === "boss" ? 0.15 : 0.08) + state.wave * 0.01;
+        enemy.x += (dx / length) * chaseSpeed;
+        enemy.y += (dy / length) * chaseSpeed;
+      } else {
+        enemy.wanderTimer -= delta * 0.001;
+        if (enemy.wanderTimer <= 0) {
+          enemy.wanderTimer = randomRange(0.6, 1.8);
+          enemy.wanderAngle += randomRange(-0.9, 0.9);
+        }
+        enemy.x += Math.cos(enemy.wanderAngle) * (enemy.speed * 0.55);
+        enemy.y += Math.sin(enemy.wanderAngle) * (enemy.speed * 0.55);
+      }
+      const hitDist = Math.hypot(state.player.x - enemy.x, state.player.y - enemy.y);
+      if (hitDist < state.player.size / 2 + enemy.size / 2 && performance.now() - enemy.lastHit >= enemy.cooldown) {
+        const damage = Math.max(4, enemy.damage - state.player.armor.defense - state.player.upgrades.armor * 1.4);
+        state.player.hp -= damage;
+        state.player.invincible = 180;
+        enemy.lastHit = performance.now();
+        addFloatingText(state.player.x + 4, state.player.y - 6, `-${Math.round(damage)}`, "#f87171", 55);
+        playTone(220, 0.04, "sine", 0.05);
+        state.hitFlash = 0.2;
+        state.screenShake = 0.14;
+        if (state.player.hp <= 0) gameOver();
+      }
+    }
+
+    function updateEnemies(delta) {
+      for (let i = state.enemies.length - 1; i >= 0; i--) {
+        const enemy = state.enemies[i];
+        if (!enemy.alive) {
+          state.enemies.splice(i, 1);
+          continue;
+        }
+        enemy.flash = Math.max(0, enemy.flash - delta * 0.001);
+        updateEnemyAI(enemy, delta);
+      }
+    }
+
+    function updateWave(delta) {
+      if (!state.waveActive) {
+        state.waveTimer -= delta * 0.001;
+        if (state.waveTimer <= 0) {
+          state.wave += 1;
+          state.player.stats.wavesCleared += 1;
+          state.player.achievements.firstWave = true;
+          state.player.gold += 20;
+          spawnWave();
+        }
+      } else if (state.enemies.length === 0) {
+        state.waveActive = false;
+        state.waveTimer = 1.6;
+        state.player.gold += 30 + state.wave * 6;
+        state.player.score += 90 + state.wave * 10;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+        state.player.mana = Math.min(state.player.maxMana, state.player.mana + 6);
+        addFloatingText(110, 92, `Wave Clear +${30 + state.wave * 6} Gold`, "#34d399", 100);
+        playTone(880, 0.12, "square", 0.08);
+        saveState();
+      }
+    }
+
+    function createSecretChest() {
+      return {
+        x: randomRange(90, canvas.width - 110),
+        y: randomRange(90, canvas.height - 110),
+        size: 24,
+        gold: 180 + state.wave * 40,
+        active: true,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function enterDungeon() {
+      if (state.mode === "dungeon") return;
+      state.mode = "dungeon";
+      state.dungeon = { floor: 1 + state.player.level, rooms: [{ x: 1, y: 1, w: 2, h: 2 }], progress: 0, chest: createSecretChest() };
+      state.player.stats.dungeonFloors += 1;
+      state.player.achievements.dungeonClear = true;
+      state.message = "Dungeon entered";
+      addFloatingText(120, 220, "Entered Dungeon", "#fbbf24", 100);
+      saveState();
+    }
+
+    function update(delta) {
+      if (state.paused || state.showShop || state.showInventory) return;
+      handleInput(delta);
+      updateParticles(delta);
+      updateFloatingTexts(delta);
+      updateEffects(delta);
+      updateCrystals();
+      updateEnemies(delta);
+      updateWave(delta);
+      if (state.mode === "dungeon") updateDungeon(delta);
+      if (state.player.hp <= 0) gameOver();
+      state.autoSaveTimer -= delta * 0.001;
+      if (state.autoSaveTimer <= 0) {
+        saveState();
+        state.autoSaveTimer = 30;
+      }
+    }
+
+    function gameOver() {
+      state.highScore = Math.max(state.highScore, state.player.score);
+      saveState();
+      playTone(180, 0.2, "sawtooth", 0.08);
+      alert("You fell in battle. The run is over. Press OK to start again.");
+      resetRun();
+    }
+
+    function buyUpgrade(id) {
+      const costs = { hp: 100, speed: 100, damage: 100, armor: 120, potion: 50, manaPotion: 50, weapon: 140, shield: 160 };
+      if (state.player.gold < costs[id]) return;
+      state.player.gold -= costs[id];
+      if (id === "hp") {
+        state.player.maxHp += 14;
+        state.player.hp = state.player.maxHp;
+        state.player.upgrades.hp += 1;
+      } else if (id === "speed") {
+        state.player.speed += 0.8;
+        state.player.upgrades.speed += 1;
+      } else if (id === "damage") {
+        state.player.attackDamage += 3;
+        state.player.weapon.damage = state.player.attackDamage;
+        state.player.upgrades.damage += 1;
+      } else if (id === "armor") {
+        state.player.armor.defense += 2;
+        state.player.upgrades.armor += 1;
+      } else if (id === "potion") {
+        state.player.inventory.potion += 1;
+      } else if (id === "manaPotion") {
+        state.player.inventory.manaPotion += 1;
+      } else if (id === "weapon") {
+        const weapon = WEAPONS.find((item) => item.name === "Crystal Sword");
+        state.player.weapon = { name: weapon.name, damage: weapon.damage, speed: weapon.speed, crit: weapon.crit };
+        state.player.attackDamage = state.player.weapon.damage;
+        state.player.critChance = Math.max(state.player.critChance, weapon.crit);
+      } else if (id === "shield") {
+        state.player.skills.shield += 1;
+        state.player.armor.defense += 3;
+      }
+      playTone(520, 0.06, "triangle", 0.06);
+      saveState();
+    }
+
+    function usePotion(type) {
+      if (type === "potion" && state.player.inventory.potion > 0) {
+        state.player.inventory.potion -= 1;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 24);
+      }
+      if (type === "manaPotion" && state.player.inventory.manaPotion > 0) {
+        state.player.inventory.manaPotion -= 1;
+        state.player.mana = Math.min(state.player.maxMana, state.player.mana + 20);
+      }
+      saveState();
+    }
+
+    function toggleShop() {
+      state.showShop = !state.showShop;
+      state.paused = false;
+      saveState();
+    }
+
+    function toggleInventory() {
+      state.showInventory = !state.showInventory;
+      saveState();
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      saveState();
+    }
+
+    function updateDungeon(delta) {
+      if (!state.dungeon) return;
+      state.dungeon.progress += delta * 0.001;
+      if (state.dungeon.chest && state.dungeon.chest.active) {
+        state.dungeon.chest.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (state.dungeon.chest.x + state.dungeon.chest.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (state.dungeon.chest.y + state.dungeon.chest.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + state.dungeon.chest.size / 2) {
+          state.player.gold += state.dungeon.chest.gold;
+          state.player.score += state.dungeon.chest.gold;
+          state.message = "Secret chest found";
+          addFloatingText(state.dungeon.chest.x, state.dungeon.chest.y - 8, `+${state.dungeon.chest.gold} Gold`, "#facc15", 90);
+          spawnParticles(state.dungeon.chest.x, state.dungeon.chest.y, "#facc15", 24);
+          state.dungeon.chest.active = false;
+          saveState();
+        }
+      }
+      if (state.dungeon.progress > 7) {
+        state.player.level += 1;
+        state.player.gold += 80;
+        state.player.score += 180;
+        state.player.stats.dungeonFloors += 1;
+        addFloatingText(120, 250, "Dungeon Cleared", "#fbbf24", 110);
+        state.mode = "arena";
+        state.dungeon = null;
+        saveState();
+      }
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, "#030712");
+      gradient.addColorStop(1, "#111827");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < 40; i++) {
+        const x = (i * 97 + state.wave * 3) % canvas.width;
+        const y = (i * 67 + state.wave * 5) % canvas.height;
+        ctx.fillStyle = i % 4 === 0 ? "rgba(255,255,255,0.15)" : "rgba(56,189,248,0.12)";
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+
+    function drawHud() {
+      const player = state.player;
+      const hpRatio = player.hp / player.maxHp;
+      const manaRatio = player.mana / player.maxMana;
+      const expRatio = player.exp / player.expToNext;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+      ctx.fillRect(12, 12, 430, 170);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(12, 12, 430, 170);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText(`HP ${Math.floor(player.hp)} / ${Math.floor(player.maxHp)}`, 24, 40);
+      ctx.fillText(`Mana ${Math.floor(player.mana)} / ${Math.floor(player.maxMana)}`, 24, 64);
+      ctx.fillText(`Stamina ${Math.floor(player.stamina)} / ${Math.floor(player.maxStamina)}`, 24, 88);
+      ctx.fillText(`Level ${player.level}`, 24, 112);
+      ctx.fillText(`EXP ${player.exp} / ${player.expToNext}`, 24, 136);
+      ctx.fillText(`Gold ${player.gold} • Wave ${state.wave}`, 24, 160);
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(170, 36, 240, 12);
+      ctx.fillStyle = "#ef4444";
+      ctx.fillRect(170, 36, 240 * hpRatio, 12);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillRect(170, 56, 240 * expRatio, 8);
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillRect(170, 74, 240 * manaRatio, 8);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Weapon: ${player.weapon.name}`, 170, 150);
+      ctx.fillText(`Skin: ${player.skin}`, 170, 168);
+      ctx.restore();
+      if (state.boss) {
+        ctx.save();
+        ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+        ctx.fillRect(12, 520, 430, 68);
+        ctx.strokeStyle = "#fb923c";
+        ctx.strokeRect(12, 520, 430, 68);
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(`Boss: ${state.boss.name}`, 24, 548);
+        ctx.fillStyle = "#334155";
+        ctx.fillRect(24, 556, 400, 10);
+        ctx.fillStyle = "#ef4444";
+        ctx.fillRect(24, 556, 400 * (state.boss.hp / state.boss.maxHp), 10);
+        ctx.restore();
+      }
+    }
+
+    function drawInventoryPanel() {
+      if (!state.showInventory) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.92)";
+      ctx.fillRect(700, 12, 240, 220);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(700, 12, 240, 220);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText("Inventory", 716, 36);
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Crystals: ${state.player.inventory.common} / ${state.player.inventory.rare} / ${state.player.inventory.epic} / ${state.player.inventory.legendary} / ${state.player.inventory.mythic}`, 716, 62);
+      ctx.fillText(`Potions: ${state.player.inventory.potion}`, 716, 86);
+      ctx.fillText(`Mana Potions: ${state.player.inventory.manaPotion}`, 716, 110);
+      ctx.fillText(`Weapon: ${state.player.weapon.name}`, 716, 134);
+      ctx.fillText(`Armor: ${state.player.armor.name}`, 716, 158);
+      ctx.fillText("Use 1 / 2 to consume", 716, 182);
+      ctx.restore();
+    }
+
+    function drawShopWindow() {
+      if (!state.showShop) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
+      ctx.fillRect(220, 140, 520, 360);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(220, 140, 520, 320);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 24px Segoe UI";
+      ctx.fillText("Shop", 240, 178);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("1) HP Boost • 100 Gold", 240, 220);
+      ctx.fillText("2) Speed Boost • 100 Gold", 240, 248);
+      ctx.fillText("3) Damage Boost • 100 Gold", 240, 276);
+      ctx.fillText("4) Armor Boost • 120 Gold", 240, 304);
+      ctx.fillText("5) Potion • 50 Gold", 240, 332);
+      ctx.fillText("6) Mana Potion • 50 Gold", 240, 360);
+      ctx.fillText("7) Crystal Sword • 140 Gold", 240, 388);
+      ctx.fillText("8) Default Skin • Free", 240, 416);
+      ctx.fillText("9) Emerald Skin • 120 Gold", 240, 444);
+      ctx.fillText("0) Ruby Skin • 180 Gold", 240, 472);
+      ctx.fillText("- / =) Gold Skin • 260 Gold", 240, 500);
+      ctx.fillText("Press B to close", 240, 528);
+      ctx.restore();
+    }
+
+    function drawPauseWindow() {
+      if (!state.paused) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+      ctx.fillRect(250, 180, 460, 240);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.strokeRect(250, 180, 460, 240);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 30px Segoe UI";
+      ctx.fillText("Paused", 386, 228);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("R = Resume", 300, 278);
+      ctx.fillText("S = Save", 300, 306);
+      ctx.fillText("T = Reset", 300, 334);
+      ctx.restore();
+    }
+
+    function buySkin(id) {
+      const skin = SKINS.find((entry) => entry.id === id);
+      if (!skin) return;
+      if (state.player.gold < skin.cost) return;
+      state.player.gold -= skin.cost;
+      state.player.skin = skin.id;
+      state.message = `${skin.label} skin equipped`;
+      addFloatingText(120, 200, `${skin.label} Skin`, "#fbbf24", 90);
+      playTone(540, 0.05, "triangle", 0.06);
+      saveState();
+    }
+
+    function drawWorld() {
+      drawBackground();
+      if (state.dungeon?.chest && state.dungeon.chest.active) {
+        const chest = state.dungeon.chest;
+        ctx.save();
+        ctx.translate(chest.x + chest.size / 2, chest.y + chest.size / 2);
+        ctx.scale(1 + Math.sin(chest.pulse) * 0.04, 1 + Math.sin(chest.pulse) * 0.04);
+        ctx.fillStyle = "#facc15";
+        ctx.fillRect(-chest.size / 2, -chest.size / 2, chest.size, chest.size);
+        ctx.fillStyle = "#92400e";
+        ctx.fillRect(-chest.size / 2 + 4, -chest.size / 2 + 10, chest.size - 8, 8);
+        ctx.restore();
+      }
+      state.crystals.forEach((crystal) => {
+        ctx.save();
+        ctx.translate(crystal.x + crystal.size / 2, crystal.y + crystal.size / 2);
+        ctx.scale(1 + Math.sin(crystal.pulse) * 0.05, 1 + Math.sin(crystal.pulse) * 0.05);
+        ctx.fillStyle = crystal.rarity.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, crystal.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = crystal.rarity.glow;
+        ctx.beginPath();
+        ctx.arc(0, 0, crystal.size + 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      state.enemies.forEach((enemy) => {
+        ctx.save();
+        ctx.translate(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2);
+        ctx.globalAlpha = enemy.flash > 0 ? 0.7 : 1;
+        ctx.fillStyle = enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#ef4444";
+        ctx.fillRect(-enemy.size / 2, -enemy.size / 2, enemy.size, enemy.size);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
+        ctx.restore();
+      });
+      ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const skin = SKINS.find((entry) => entry.id === state.player.skin) || SKINS[0];
+      ctx.fillStyle = skin.color;
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(state.player.x + 6, state.player.y + 6, 10, 10);
+      state.particles.forEach((p) => {
+        ctx.globalAlpha = Math.max(0, p.life / 36);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+      state.effects.forEach((effect) => {
+        ctx.fillStyle = effect.color;
+        ctx.fillRect(effect.x, effect.y, 8, 8);
+      });
+      state.floatingTexts.forEach((t) => {
+        ctx.fillStyle = t.color;
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(t.text, t.x, t.y);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawWorld();
+      drawHud();
+      drawInventoryPanel();
+      drawShopWindow();
+      drawPauseWindow();
+    }
+
+    function loop(timestamp) {
+      const delta = Math.min(32, timestamp - lastTime || 16);
+      lastTime = timestamp;
+      update(delta);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      keyState[key] = true;
+      if ([" ", "space"].includes(key)) event.preventDefault();
+      if (key === "escape") { event.preventDefault(); togglePause(); }
+      if (key === "b") toggleShop();
+      if (key === "i") toggleInventory();
+      if (key === "r" && state.paused) state.paused = false;
+      if (key === "s" && state.paused) saveState();
+      if (key === "t" && state.paused) resetRun();
+      if (key === "1") buyUpgrade("hp");
+      if (key === "2") buyUpgrade("speed");
+      if (key === "3") buyUpgrade("damage");
+      if (key === "4") buyUpgrade("armor");
+      if (key === "5") buyUpgrade("potion");
+      if (key === "6") buyUpgrade("manaPotion");
+      if (key === "7") buyUpgrade("weapon");
+      if (key === "8") buySkin("default");
+      if (key === "9") buySkin("emerald");
+      if (key === "0") buySkin("ruby");
+      if (key === "-" || key === "=") buySkin("gold");
+      if (key === "1" && state.showInventory) usePotion("potion");
+      if (key === "2" && state.showInventory) usePotion("manaPotion");
+      if (key === "e") enterDungeon();
+      if (key === "q") performSkill();
+    });
+
+    document.addEventListener("keyup", (event) => {
+      keyState[event.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener("mousemove", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      mouse.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+    });
+
+    canvas.addEventListener("mousedown", (event) => {
+      if (event.button === 0) pointerState.attack = true;
+      if (event.button === 2) {
+        event.preventDefault();
+        performSkill();
+      }
+    });
+
+    canvas.addEventListener("mouseup", (event) => {
+      if (event.button === 0) pointerState.attack = false;
+    });
+
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+    window.addEventListener("beforeunload", saveState);
+
+    if (!state.crystals.length) {
+      for (let i = 0; i < 6; i++) state.crystals.push(createCrystal());
+    }
+    if (!state.enemies.length && !state.waveActive) spawnWave();
+    if (!state.quests.length) state.quests = createQuests();
+    if (state.wave % 5 === 0) state.boss = { name: "Warden", hp: 260, maxHp: 260 };
+    startMusic();
+    saveState();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+
+@@ -0,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #020617, #111827 45%, #0f172a);
+      color: #f8fafc;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      width: min(100%, 1100px);
+    }
+    canvas {
+      width: 100%;
+      max-width: 960px;
+      height: auto;
+      border: 3px solid #38bdf8;
+      background: #020617;
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.2);
+      touch-action: none;
+      border-radius: 10px;
+    }
+    .hint {
+      font-size: 14px;
+      color: #cbd5e1;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .controls button {
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      background: rgba(56, 189, 248, 0.18);
+      color: white;
+      cursor: pointer;
+    }
+    .controls button:active { transform: scale(0.98); }
+    @media (max-width: 768px) {
+      body { overflow: auto; }
+      canvas { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="controls">
+      <button data-action="up">↑</button>
+      <button data-action="left">←</button>
+      <button data-action="down">↓</button>
+      <button data-action="right">→</button>
+      <button data-action="attack">Attack</button>
+      <button data-action="shop">Shop</button>
+      <button data-action="inventory">Inventory</button>
+    </div>
+    <div class="hint">WASD / Arrow Keys = Move • Space = Attack • ESC = Pause • B = Shop • I = Inventory • D = Dungeon</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const saveKey = "crystal-hunter-save-v1";
+    const rarityData = [
+      { name: "common", color: "#38bdf8", value: 10, label: "Common" },
+      { name: "rare", color: "#4ade80", value: 25, label: "Rare" },
+      { name: "epic", color: "#a855f7", value: 50, label: "Epic" },
+      { name: "legendary", color: "#facc15", value: 100, label: "Legendary" }
+    ];
+
+    const keyState = {};
+    const pointerState = { up: false, down: false, left: false, right: false, attack: false };
+    let lastTime = 0;
+    let audioCtx = null;
+    let musicGain = null;
+    let musicOsc = null;
+
+    function createDefaultPlayer() {
+      return {
+        x: 120,
+        y: 120,
+        size: 28,
+        speed: 4.8,
+        hp: 100,
+        maxHp: 100,
+        armor: 0,
+        level: 1,
+        exp: 0,
+        expToNext: 100,
+        score: 0,
+        gold: 0,
+        attackDamage: 12,
+        attackCooldown: 0,
+        critChance: 0.12,
+        critDamage: 2.0,
+        attackRange: 72,
+        invincible: 0,
+        displayHp: 1,
+        displayExp: 0,
+        weapon: { name: "Iron Sword", damage: 12 },
+        armorEquip: { name: "Leather Armor", defense: 0 },
+        inventory: { common: 0, rare: 0, epic: 0, legendary: 0 },
+        upgrades: { hp: 0, speed: 0, damage: 0, armor: 0 },
+        skills: { dash: 0, shield: 0, blast: 0 },
+        stats: { crystals: 0, enemiesKilled: 0, damageDealt: 0, wavesCleared: 0, bossDefeats: 0, dungeonFloors: 0 },
+        achievements: { firstCrystal: false, firstWave: false, bossDefeated: false, dungeonClear: false }
+      };
+    }
+
+    function createDefaultGame() {
+      return {
+        player: createDefaultPlayer(),
+        enemies: [],
+        crystals: [],
+        particles: [],
+        floatingTexts: [],
+        effects: [],
+        paused: false,
+        showShop: false,
+        showInventory: false,
+        screenShake: 0,
+        hitFlash: 0,
+        wave: 1,
+        waveTimer: 0,
+        waveActive: false,
+        waveCooldown: 4,
+        endless: true,
+        bossPending: false,
+        mode: "arena",
+        dungeon: null,
+        lastSavedAt: 0,
+        highScore: Number(localStorage.getItem("highscore") || 0)
+      };
+    }
+
+    const state = loadGame();
+
+    function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+    function saveGame() {
+      const data = {
+        player: state.player,
+        wave: state.wave,
+        highScore: state.highScore,
+        mode: state.mode,
+        dungeon: state.dungeon,
+        stats: state.player.stats,
+        achievements: state.player.achievements,
+        showShop: state.showShop,
+        showInventory: state.showInventory,
+        waveActive: state.waveActive
+      };
+      localStorage.setItem(saveKey, JSON.stringify(data));
+      localStorage.setItem("highscore", String(state.highScore));
+      state.lastSavedAt = Date.now();
+    }
+
+    function loadGame() {
+      try {
+        const raw = localStorage.getItem(saveKey);
+        if (!raw) return createDefaultGame();
+        const parsed = JSON.parse(raw);
+        const game = createDefaultGame();
+        if (parsed.player) {
+          game.player = { ...game.player, ...parsed.player };
+          game.player.inventory = { ...game.player.inventory, ...(parsed.player.inventory || {}) };
+          game.player.upgrades = { ...game.player.upgrades, ...(parsed.player.upgrades || {}) };
+          game.player.skills = { ...game.player.skills, ...(parsed.player.skills || {}) };
+          game.player.stats = { ...game.player.stats, ...(parsed.player.stats || {}) };
+          game.player.achievements = { ...game.player.achievements, ...(parsed.player.achievements || {}) };
+          game.player.weapon = { ...game.player.weapon, ...(parsed.player.weapon || {}) };
+          game.player.armorEquip = { ...game.player.armorEquip, ...(parsed.player.armorEquip || {}) };
+          game.player.attackDamage = game.player.weapon.damage;
+        }
+        game.wave = parsed.wave || 1;
+        game.highScore = Number(parsed.highScore || localStorage.getItem("highscore") || 0);
+        game.mode = parsed.mode || "arena";
+        game.dungeon = parsed.dungeon || null;
+        game.showShop = Boolean(parsed.showShop);
+        game.showInventory = Boolean(parsed.showInventory);
+        game.waveActive = Boolean(parsed.waveActive);
+        return game;
+      } catch (error) {
+        console.warn("Save load failed", error);
+        return createDefaultGame();
+      }
+    }
+
+    function resetGame() {
+      const fresh = createDefaultGame();
+      fresh.highScore = state.highScore;
+      Object.assign(state, fresh);
+      state.highScore = fresh.highScore;
+      state.player.score = 0;
+      state.player.gold = 0;
+      state.player.attackDamage = state.player.weapon.damage;
+      saveGame();
+      spawnWave();
+    }
+
+    function initWorld() {
+      state.crystals.push(createCrystal());
+      spawnWave();
+      saveGame();
+    }
+
+    function createCrystal() {
+      const roll = Math.random();
+      let rarity;
+      if (roll < 0.58) rarity = rarityData[0];
+      else if (roll < 0.84) rarity = rarityData[1];
+      else if (roll < 0.96) rarity = rarityData[2];
+      else rarity = rarityData[3];
+      return {
+        x: randomRange(40, canvas.width - 40),
+        y: randomRange(60, canvas.height - 40),
+        size: 18,
+        rarity,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function createEnemy(kind = "normal") {
+      const maxHp = kind === "elite" ? 70 + state.wave * 8 : kind === "boss" ? 220 + state.wave * 20 : 36 + state.wave * 5;
+      const speed = kind === "elite" ? 2.8 + state.wave * 0.03 : kind === "boss" ? 1.6 : 1.6 + state.wave * 0.03;
+      const damage = kind === "elite" ? 8 + Math.floor(state.wave / 2) : kind === "boss" ? 14 + state.wave : 6 + Math.floor(state.wave / 2);
+      return {
+        x: randomRange(80, canvas.width - 80),
+        y: randomRange(90, canvas.height - 80),
+        size: kind === "boss" ? 44 : kind === "elite" ? 34 : 28,
+        speed,
+        hp: maxHp,
+        maxHp,
+        damage,
+        cooldown: 900,
+        lastHit: 0,
+        kind,
+        alive: true,
+        flash: 0
+      };
+    }
+
+    function spawnWave() {
+      state.enemies = [];
+      const count = 4 + state.wave * 2 + (state.wave % 5 === 0 ? 2 : 0);
+      const bossWave = state.wave % 5 === 0;
+      for (let i = 0; i < count; i++) {
+        const kind = bossWave && i === 0 ? "boss" : i % 6 === 0 ? "elite" : "normal";
+        state.enemies.push(createEnemy(kind));
+      }
+      state.waveActive = true;
+      state.waveTimer = 0;
+      addFloatingText(canvas.width / 2 - 80, 90, `Wave ${state.wave}`, "#fbbf24", 120);
+      playTone(660, 0.08, "triangle", 0.08);
+    }
+
+    function updateWave(delta) {
+      if (!state.waveActive) {
+        state.waveTimer += delta;
+        if (state.waveTimer >= state.waveCooldown) {
+          state.wave++;
+          state.player.stats.wavesCleared += 1;
+          state.player.achievements.firstWave = true;
+          spawnWave();
+        }
+        return;
+      }
+      if (state.enemies.length === 0) {
+        state.waveActive = false;
+        state.waveTimer = 0;
+        state.player.stats.wavesCleared += 1;
+        state.player.gold += 40 + state.wave * 8;
+        state.player.score += 100 + state.wave * 10;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+        addFloatingText(120, 80, `Wave Clear +${40 + state.wave * 8} Gold`, "#34d399", 90);
+        playTone(880, 0.12, "square", 0.08);
+        if (state.wave % 5 === 0) {
+          state.player.achievements.bossDefeated = true;
+          state.player.stats.bossDefeats += 1;
+        }
+        saveGame();
+      }
+    }
+
+    function addFloatingText(x, y, text, color, life = 80) {
+      state.floatingTexts.push({ x, y, text, color, life, vy: -0.8 });
+    }
+
+    function spawnParticles(x, y, color, count = 16) {
+      for (let i = 0; i < count; i++) {
+        state.particles.push({
+          x,
+          y,
+          vx: randomRange(-2.2, 2.2),
+          vy: randomRange(-2.2, 2.2),
+          life: 34,
+          color
+        });
+      }
+    }
+
+    function updateParticles(delta) {
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= delta * 60;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+        const t = state.floatingTexts[i];
+        t.y += t.vy * delta * 0.06;
+        t.life -= delta;
+        if (t.life <= 0) state.floatingTexts.splice(i, 1);
+      }
+    }
+
+    function updateEffects(delta) {
+      state.effects = state.effects.filter((effect) => {
+        effect.life -= delta * 60;
+        return effect.life > 0;
+      });
+    }
+
+    function handleInput(delta) {
+      const moveX = (keyState["arrowright"] || keyState["d"] || pointerState.right ? 1 : 0) - (keyState["arrowleft"] || keyState["a"] || pointerState.left ? 1 : 0);
+      const moveY = (keyState["arrowdown"] || keyState["s"] || pointerState.down ? 1 : 0) - (keyState["arrowup"] || keyState["w"] || pointerState.up ? 1 : 0);
+      const len = Math.hypot(moveX, moveY) || 1;
+      if (moveX || moveY) {
+        const nx = (moveX / len) * state.player.speed;
+        const ny = (moveY / len) * state.player.speed;
+        state.player.x += nx;
+        state.player.y += ny;
+      }
+      state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
+      state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
+      state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
+      state.player.invincible = Math.max(0, state.player.invincible - delta * 0.001);
+      state.hitFlash = Math.max(0, state.hitFlash - delta * 0.001);
+      state.screenShake = Math.max(0, state.screenShake - delta * 0.001);
+      if ((keyState[" "] || keyState["space"] || pointerState.attack) && state.player.attackCooldown <= 0 && !state.paused) {
+        performAttack();
+      }
+    }
+
+    function performAttack() {
+      if (state.paused) return;
+      state.player.attackCooldown = 260;
+      const attackRadius = state.player.attackRange;
+      let damage = state.player.attackDamage;
+      const crit = Math.random() < state.player.critChance;
+      if (crit) damage *= state.player.critDamage;
+      if (state.player.skills.blast > 0) damage += state.player.skills.blast * 4;
+      state.player.stats.damageDealt += damage;
+      state.effects.push({ x: state.player.x + 10, y: state.player.y + 10, life: 12, color: crit ? "#fde68a" : "#f8fafc" });
+      spawnParticles(state.player.x + 10, state.player.y + 10, crit ? "#fbbf24" : "#f8fafc");
+      playTone(crit ? 1200 : 900, 0.05, "square", 0.06);
+      state.enemies.forEach((enemy) => {
+        const dx = (state.player.x + state.player.size / 2) - (enemy.x + enemy.size / 2);
+        const dy = (state.player.y + state.player.size / 2) - (enemy.y + enemy.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < attackRadius + enemy.size / 2) {
+          enemy.hp -= damage;
+          enemy.flash = 0.18;
+          addFloatingText(enemy.x + 6, enemy.y - 4, `${Math.round(damage)}${crit ? "!" : ""}`, crit ? "#fbbf24" : "#fda4af", 65);
+          if (enemy.hp <= 0) {
+            killEnemy(enemy);
+          }
+        }
+      });
+      state.hitFlash = 0.12;
+      state.screenShake = 0.18;
+      saveGame();
+    }
+
+    function killEnemy(enemy) {
+      enemy.alive = false;
+      state.player.stats.enemiesKilled += 1;
+      state.player.stats.crystals += 1;
+      state.player.gold += 10 + (enemy.kind === "elite" ? 16 : 0) + (enemy.kind === "boss" ? 40 : 0);
+      state.player.score += 25 + (enemy.kind === "elite" ? 35 : 0) + (enemy.kind === "boss" ? 80 : 0);
+      state.player.exp += 18 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 35 : 0);
+      state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1.2);
+      addFloatingText(enemy.x, enemy.y - 8, "+Gold", "#34d399", 70);
+      spawnParticles(enemy.x, enemy.y, enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#22c55e", enemy.kind === "boss" ? 50 : 25);
+      state.effects.push({ x: enemy.x, y: enemy.y, life: 20, color: "#fde68a" });
+      playTone(440, 0.06, "sawtooth", 0.05);
+      if (state.player.exp >= state.player.expToNext) {
+        levelUp();
+      }
+    }
+
+    function levelUp() {
+      state.player.level += 1;
+      state.player.exp = 0;
+      state.player.expToNext = Math.round(state.player.expToNext * 1.18);
+      state.player.maxHp += 12;
+      state.player.hp = state.player.maxHp;
+      state.player.attackDamage += 2;
+      state.player.weapon.damage = state.player.attackDamage;
+      state.player.upgrades.hp += 1;
+      addFloatingText(120, 120, `Level ${state.player.level}`, "#fbbf24", 100);
+      playTone(740, 0.12, "triangle", 0.08);
+      saveGame();
+    }
+
+    function updateEnemies(delta) {
+      const playerCenterX = state.player.x + state.player.size / 2;
+      const playerCenterY = state.player.y + state.player.size / 2;
+      for (let i = state.enemies.length - 1; i >= 0; i--) {
+        const enemy = state.enemies[i];
+        if (!enemy.alive) {
+          state.enemies.splice(i, 1);
+          continue;
+        }
+        enemy.flash = Math.max(0, enemy.flash - delta * 0.001);
+        const ex = playerCenterX - (enemy.x + enemy.size / 2);
+        const ey = playerCenterY - (enemy.y + enemy.size / 2);
+        const dist = Math.hypot(ex, ey);
+        if (dist > 0.001) {
+          const nx = (ex / dist) * enemy.speed;
+          const ny = (ey / dist) * enemy.speed;
+          enemy.x += nx;
+          enemy.y += ny;
+        }
+        const hitDist = Math.hypot(state.player.x - enemy.x, state.player.y - enemy.y);
+        if (hitDist < state.player.size / 2 + enemy.size / 2 && performance.now() - enemy.lastHit >= enemy.cooldown) {
+          const damage = Math.max(4, enemy.damage - state.player.armorEquip.defense - state.player.upgrades.armor * 1.2);
+          state.player.hp -= damage;
+          state.player.invincible = 180;
+          enemy.lastHit = performance.now();
+          addFloatingText(state.player.x + 6, state.player.y - 6, `-${Math.round(damage)}`, "#f87171", 55);
+          playTone(220, 0.04, "sine", 0.05);
+          state.hitFlash = 0.2;
+          state.screenShake = 0.16;
+          if (state.player.hp <= 0) {
+            gameOver();
+            return;
+          }
+        }
+      }
+    }
+
+    function updateCrystals() {
+      for (let i = state.crystals.length - 1; i >= 0; i--) {
+        const crystal = state.crystals[i];
+        crystal.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (crystal.x + crystal.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (crystal.y + crystal.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + crystal.size / 2) {
+          const reward = crystal.rarity.value;
+          state.player.gold += reward;
+          state.player.score += reward;
+          state.player.inventory[crystal.rarity.name] += 1;
+          state.player.stats.crystals += 1;
+          state.player.achievements.firstCrystal = true;
+          addFloatingText(crystal.x, crystal.y - 6, `+${reward} Gold`, crystal.rarity.color, 70);
+          spawnParticles(crystal.x, crystal.y, crystal.rarity.color);
+          playTone(580, 0.06, "triangle", 0.05);
+          state.crystals.splice(i, 1);
+          state.crystals.push(createCrystal());
+          saveGame();
+        }
+      }
+    }
+
+    function update(delta) {
+      if (state.paused || state.showShop || state.showInventory) return;
+      handleInput(delta);
+      updateParticles(delta);
+      updateFloatingTexts(delta);
+      updateEffects(delta);
+      updateCrystals();
+      updateEnemies(delta);
+      updateWave(delta);
+      if (state.mode === "dungeon") updateDungeon(delta);
+      if (state.player.hp <= 0) gameOver();
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, "#020617");
+      gradient.addColorStop(1, "#0f172a");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      for (let i = 0; i < 30; i++) {
+        const x = (i * 37) % canvas.width;
+        const y = (i * 53) % canvas.height;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+
+    function drawHud() {
+      state.player.displayHp += (state.player.hp / state.player.maxHp - state.player.displayHp) * 0.12;
+      state.player.displayExp += (state.player.exp / state.player.expToNext - state.player.displayExp) * 0.12;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.8)";
+      ctx.fillRect(12, 12, 420, 140);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(12, 12, 420, 140);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText(`HP ${Math.floor(state.player.hp)} / ${Math.floor(state.player.maxHp)}`, 24, 40);
+      ctx.fillText(`Level ${state.player.level}`, 24, 64);
+      ctx.fillText(`EXP ${state.player.exp} / ${state.player.expToNext}`, 24, 88);
+      ctx.fillText(`Gold ${state.player.gold}`, 24, 112);
+      ctx.fillText(`Score ${state.player.score}`, 24, 136);
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(160, 34, 220, 12);
+      ctx.fillStyle = state.player.displayHp > 0.35 ? "#22c55e" : "#ef4444";
+      ctx.fillRect(160, 34, 220 * state.player.displayHp, 12);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillRect(160, 54, 220 * state.player.displayExp, 8);
+      ctx.restore();
+    }
+
+    function drawInventoryPanel() {
+      if (!state.showInventory) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.85)";
+      ctx.fillRect(720, 12, 220, 190);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(720, 12, 220, 190);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText("Inventory", 736, 36);
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Common ${state.player.inventory.common}`, 736, 62);
+      ctx.fillText(`Rare ${state.player.inventory.rare}`, 736, 84);
+      ctx.fillText(`Epic ${state.player.inventory.epic}`, 736, 106);
+      ctx.fillText(`Legendary ${state.player.inventory.legendary}`, 736, 128);
+      ctx.fillText(`Weapon ${state.player.weapon.name}`, 736, 152);
+      ctx.fillText(`Armor ${state.player.armorEquip.name}`, 736, 174);
+      ctx.restore();
+    }
+
+    function drawShopWindow() {
+      if (!state.showShop) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.94)";
+      ctx.fillRect(220, 140, 520, 270);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(220, 140, 520, 270);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 24px Segoe UI";
+      ctx.fillText("Shop", 240, 180);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("1) Buy HP +15 (100 Gold)", 240, 220);
+      ctx.fillText("2) Buy Speed +1 (100 Gold)", 240, 248);
+      ctx.fillText("3) Buy Damage +3 (100 Gold)", 240, 276);
+      ctx.fillText("4) Buy Armor +2 (120 Gold)", 240, 304);
+      ctx.fillText("Press B to close", 240, 340);
+      ctx.restore();
+    }
+
+    function drawPauseWindow() {
+      if (!state.paused) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+      ctx.fillRect(250, 170, 460, 260);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.strokeRect(250, 170, 460, 260);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 30px Segoe UI";
+      ctx.fillText("Paused", 390, 220);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("R = Resume", 300, 270);
+      ctx.fillText("S = Save", 300, 298);
+      ctx.fillText("T = Reset", 300, 326);
+      ctx.restore();
+    }
+
+    function drawDungeon() {
+      if (state.mode !== "dungeon" || !state.dungeon) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(24, 420, 240, 150);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(24, 420, 240, 150);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Dungeon Floor ${state.dungeon.floor}`, 36, 446);
+      ctx.fillText(`Rooms ${state.dungeon.rooms.length}`, 36, 470);
+      ctx.fillText(`Portal Ready`, 36, 494);
+      ctx.restore();
+    }
+
+    function drawWorld() {
+      drawBackground();
+      if (state.mode === "dungeon") drawDungeonGrid();
+      state.crystals.forEach((crystal) => {
+        ctx.save();
+        ctx.translate(crystal.x + crystal.size / 2, crystal.y + crystal.size / 2);
+        ctx.scale(1 + Math.sin(crystal.pulse) * 0.04, 1 + Math.sin(crystal.pulse) * 0.04);
+        ctx.fillStyle = crystal.rarity.color;
+        ctx.fillRect(-crystal.size / 2, -crystal.size / 2, crystal.size, crystal.size);
+        ctx.restore();
+      });
+      state.enemies.forEach((enemy) => {
+        ctx.save();
+        ctx.translate(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2);
+        ctx.globalAlpha = enemy.flash > 0 ? 0.65 : 1;
+        ctx.fillStyle = enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#ef4444";
+        ctx.fillRect(-enemy.size / 2, -enemy.size / 2, enemy.size, enemy.size);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
+        ctx.restore();
+      });
+      ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+      state.particles.forEach((p) => {
+        ctx.globalAlpha = Math.max(0, p.life / 34);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+      state.effects.forEach((effect) => {
+        ctx.fillStyle = effect.color;
+        ctx.fillRect(effect.x, effect.y, 6, 6);
+      });
+      state.floatingTexts.forEach((t) => {
+        ctx.fillStyle = t.color;
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(t.text, t.x, t.y);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawWorld();
+      drawHud();
+      drawInventoryPanel();
+      drawShopWindow();
+      drawPauseWindow();
+      drawDungeon();
+      if (state.mode === "dungeon") drawDungeonPlayer();
+    }
+
+    function gameOver() {
+      state.highScore = Math.max(state.highScore, state.player.score);
+      saveGame();
+      playTone(180, 0.2, "sawtooth", 0.08);
+      alert("Game Over! Press OK to restart.");
+      resetGame();
+    }
+
+    function buyUpgrade(id) {
+      const costs = { hp: 100, speed: 100, damage: 100, armor: 120 };
+      if (state.player.gold < costs[id]) return;
+      state.player.gold -= costs[id];
+      if (id === "hp") {
+        state.player.maxHp += 15;
+        state.player.hp = state.player.maxHp;
+        state.player.upgrades.hp += 1;
+      } else if (id === "speed") {
+        state.player.speed += 1;
+        state.player.upgrades.speed += 1;
+      } else if (id === "damage") {
+        state.player.attackDamage += 3;
+        state.player.weapon.damage = state.player.attackDamage;
+        state.player.upgrades.damage += 1;
+      } else if (id === "armor") {
+        state.player.armorEquip.defense += 2;
+        state.player.upgrades.armor += 1;
+      }
+      playTone(520, 0.06, "triangle", 0.06);
+      saveGame();
+    }
+
+    function toggleShop() {
+      state.showShop = !state.showShop;
+      if (!state.showShop) state.paused = false;
+    }
+
+    function toggleInventory() {
+      state.showInventory = !state.showInventory;
+    }
+
+    function generateDungeon() {
+      const size = 11;
+      const grid = Array.from({ length: size }, () => Array(size).fill(1));
+      const rooms = [];
+      const start = { x: 1, y: 1 };
+      rooms.push({ x: 1, y: 1, w: 2, h: 2 });
+      const targets = [
+        { x: 3, y: 3 },
+        { x: 7, y: 3 },
+        { x: 8, y: 7 },
+        { x: 3, y: 8 }
+      ];
+      targets.forEach((room) => {
+        rooms.push({ x: room.x, y: room.y, w: 2, h: 2 });
+      });
+      rooms.forEach((room) => {
+        for (let y = room.y; y < room.y + room.h; y++) {
+          for (let x = room.x; x < room.x + room.w; x++) {
+            grid[y][x] = 0;
+          }
+        }
+      });
+      for (let i = 1; i < rooms.length; i++) {
+        const prev = rooms[i - 1];
+        const next = rooms[i];
+        const cx1 = prev.x + Math.floor(prev.w / 2);
+        const cy1 = prev.y + Math.floor(prev.h / 2);
+        const cx2 = next.x + Math.floor(next.w / 2);
+        const cy2 = next.y + Math.floor(next.h / 2);
+        for (let x = Math.min(cx1, cx2); x <= Math.max(cx1, cx2); x++) grid[cy1][x] = 0;
+        for (let y = Math.min(cy1, cy2); y <= Math.max(cy1, cy2); y++) grid[y][cx2] = 0;
+      }
+      state.dungeon = { floor: 1 + state.player.level, rooms, grid, start, exit: rooms[rooms.length - 1] };
+      state.player.x = start.x * 50 + 20;
+      state.player.y = start.y * 50 + 20;
+      state.mode = "dungeon";
+      state.player.stats.dungeonFloors += 1;
+      saveGame();
+    }
+
+    function drawDungeonGrid() {
+      if (!state.dungeon) return;
+      for (let y = 0; y < state.dungeon.grid.length; y++) {
+        for (let x = 0; x < state.dungeon.grid[y].length; x++) {
+          const tile = state.dungeon.grid[y][x];
+          ctx.fillStyle = tile === 1 ? "#1f2937" : "#0f766e";
+          ctx.fillRect(x * 48 + 24, y * 48 + 24, 40, 40);
+        }
+      }
+      const exit = state.dungeon.exit;
+      ctx.fillStyle = "#facc15";
+      ctx.fillRect(exit.x * 48 + 24, exit.y * 48 + 24, 40, 40);
+    }
+
+    function drawDungeonPlayer() {
+      if (!state.dungeon) return;
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+    }
+
+    function updateDungeon(delta) {
+      if (!state.dungeon) return;
+      const tileX = Math.floor((state.player.x + state.player.size / 2) / 48) - 1;
+      const tileY = Math.floor((state.player.y + state.player.size / 2) / 48) - 1;
+      const exit = state.dungeon.exit;
+      if (tileX === exit.x && tileY === exit.y) {
+        state.player.level += 1;
+        state.player.gold += 60;
+        state.player.score += 120;
+        addFloatingText(120, 440, "Floor Cleared", "#fbbf24", 110);
+        generateDungeon();
+      }
+    }
+
+    function playTone(frequency, duration, type = "sine", volume = 0.04) {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    }
+
+    function startMusic() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (musicGain) return;
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.01;
+      musicGain.connect(audioCtx.destination);
+      musicOsc = audioCtx.createOscillator();
+      musicOsc.type = "sine";
+      musicOsc.frequency.value = 220;
+      musicOsc.connect(musicGain);
+      musicOsc.start();
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      saveGame();
+    }
+
+    function handleCanvasClick(event) {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      if (state.paused) {
+        if (x > 300 && x < 420 && y > 260 && y < 300) {
+          state.paused = false;
+        } else if (x > 300 && x < 420 && y > 300 && y < 340) {
+          saveGame();
+        } else if (x > 300 && x < 420 && y > 340 && y < 380) {
+          resetGame();
+        }
+        return;
+      }
+      if (state.showShop) {
+        if (x > 250 && x < 480 && y > 220 && y < 250) buyUpgrade("hp");
+        if (x > 250 && x < 480 && y > 248 && y < 276) buyUpgrade("speed");
+        if (x > 250 && x < 480 && y > 276 && y < 304) buyUpgrade("damage");
+        if (x > 250 && x < 480 && y > 304 && y < 332) buyUpgrade("armor");
+      }
+    }
+
+    function animate(timestamp) {
+      const delta = Math.min(32, timestamp - lastTime || 16);
+      lastTime = timestamp;
+      update(delta);
+      draw();
+      requestAnimationFrame(animate);
+    }
+
+    document.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      keyState[key] = true;
+      if (key === " " || key === "space") { event.preventDefault(); }
+      if (key === "escape") {
+        event.preventDefault();
+        togglePause();
+      }
+      if (key === "b") toggleShop();
+      if (key === "i") toggleInventory();
+      if (key === "r" && state.paused) state.paused = false;
+      if (key === "s" && state.paused) saveGame();
+      if (key === "t" && state.paused) resetGame();
+      if (key === "d") generateDungeon();
+      if (key === "1") buyUpgrade("hp");
+      if (key === "2") buyUpgrade("speed");
+      if (key === "3") buyUpgrade("damage");
+      if (key === "4") buyUpgrade("armor");
+    });
+
+    document.addEventListener("keyup", (event) => {
+      keyState[event.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener("click", handleCanvasClick);
+    window.addEventListener("beforeunload", saveGame);
+    document.querySelectorAll(".controls button").forEach((button) => {
+      const action = button.getAttribute("data-action");
+      button.addEventListener("pointerdown", () => {
+        if (action === "up") pointerState.up = true;
+        if (action === "down") pointerState.down = true;
+        if (action === "left") pointerState.left = true;
+        if (action === "right") pointerState.right = true;
+        if (action === "attack") pointerState.attack = true;
+        if (action === "shop") toggleShop();
+        if (action === "inventory") toggleInventory();
+      });
+      button.addEventListener("pointerup", () => {
+        if (action === "up") pointerState.up = false;
+        if (action === "down") pointerState.down = false;
+        if (action === "left") pointerState.left = false;
+        if (action === "right") pointerState.right = false;
+        if (action === "attack") pointerState.attack = false;
+      });
+      button.addEventListener("pointerleave", () => {
+        if (action === "up") pointerState.up = false;
+        if (action === "down") pointerState.down = false;
+        if (action === "left") pointerState.left = false;
+        if (action === "right") pointerState.right = false;
+        if (action === "attack") pointerState.attack = false;
+      });
+    });
+
+    initWorld();
+    startMusic();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter RPG</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="game-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Crystal Hunter • Web Playable Build</p>
+        <h1>Crystal Hunter RPG</h1>
+      </div>
+      <div class="status-pill">Lore + Combat + Shop</div>
+    </header>
+    <section class="story-card" aria-label="Crystal Hunter lore">
+      <h2>Crystal Hunter Lore</h2>
+      <p>You are Crystal Hunter, a rogue traveler crossing fractured realms in pursuit of living crystal energy. Each shard you claim strengthens your path while the veil between worlds begins to tear apart.</p>
+    </section>
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="hint">WASD / Arrows = Move • Left Click = Attack • Space = Fire Light Shot • P = Upgrade Shop • I = Inventory • B = Shop • E = Enter Dungeon • ESC = Pause</div>
+    <section class="vibe-panel" aria-label="Vibe Coding content">
+      <h2>AI Studio: Vibe Coding</h2>
+      <div class="vibe-grid">
+        <article>
+          <h3>Natural Language as Code</h3>
+          <p>Prompting AI with plain language turns intent into implementation, replacing brittle syntax drills with fast iteration.</p>
+          <img src="https://res.cloudinary.com/[User Content]/image/upload/v1/Crystal-Hunter/vibe-coding.jpg" alt="Vibe coding concept" />
+        </article>
+        <article>
+          <h3>Agile Refinement & Rapid Iteration</h3>
+          <p>Each feedback loop sharpens the prompt, improves the output, and shortens the path from concept to playable experience.</p>
+          <img src="https://res.cloudinary.com/[User Content]/image/upload/v1/Crystal-Hunter/hero.jpg" alt="Gameplay loop concept" />
+        </article>
+        <article>
+          <h3>High-Level Orchestration</h3>
+          <p>The creator acts as a director: setting vision, constraints, and acceptance while the AI handles concrete execution.</p>
+        </article>
+        <article>
+          <h3>MDA + Generative AI</h3>
+          <p>Mechanics, dynamics, and aesthetics become a design framework for guiding AI-generated systems and tailoring experiences for different player types.</p>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const STORAGE_KEY = "crystal-hunter-rpg-v2";
+    const RARITY_DATA = [
+      { name: "common", label: "Common", color: "#38bdf8", value: 8, glow: "rgba(56,189,248,0.35)" },
+      { name: "rare", label: "Rare", color: "#4ade80", value: 16, glow: "rgba(74,222,128,0.35)" },
+      { name: "epic", label: "Epic", color: "#a855f7", value: 32, glow: "rgba(168,85,247,0.35)" },
+      { name: "legendary", label: "Legendary", color: "#facc15", value: 60, glow: "rgba(250,204,21,0.35)" },
+      { name: "mythic", label: "Mythic", color: "#fb7185", value: 100, glow: "rgba(251,113,133,0.35)" }
+    ];
+    const WEAPONS = [
+      { name: "Wood Sword", tier: "Common", damage: 12, speed: 0.9, crit: 0.08 },
+      { name: "Iron Sword", tier: "Rare", damage: 15, speed: 1.05, crit: 0.1 },
+      { name: "Steel Sword", tier: "Epic", damage: 19, speed: 1.15, crit: 0.12 },
+      { name: "Crystal Sword", tier: "Legendary", damage: 24, speed: 1.25, crit: 0.15 },
+      { name: "Dragon Sword", tier: "Mythic", damage: 30, speed: 1.35, crit: 0.18 }
+    ];
+    const SKINS = [
+      { id: "default", label: "Default", color: "#22c55e", cost: 0, description: "The traveler’s original mantle, balanced and unadorned." },
+      { id: "emerald", label: "Emerald Green", color: "#34d399", cost: 120, description: "A skin of hope and concealment for patient hunters." },
+      { id: "ruby", label: "Ruby Red", color: "#fb7185", cost: 180, description: "A skin of fury and relentless attack power." },
+      { id: "gold", label: "Royal Gold", color: "#fbbf24", cost: 260, description: "A skin of royalty and fortune for treasure-seekers." }
+    ];
+
+    const keyState = {};
+    const pointerState = { up: false, down: false, left: false, right: false, attack: false };
+    const mouse = { x: 0, y: 0 };
+    let lastTime = 0;
+    let audioCtx = null;
+    let musicGain = null;
+    let musicOsc = null;
+
+    function createPlayer() {
+      return {
+        x: 140,
+        y: 140,
+        size: 24,
+        speed: 4.2,
+        hp: 110,
+        maxHp: 110,
+        mana: 60,
+        maxMana: 60,
+        stamina: 100,
+        maxStamina: 100,
+        level: 1,
+        exp: 0,
+        expToNext: 100,
+        gold: 0,
+        score: 0,
+        attackDamage: 12,
+        attackRange: 84,
+        attackCooldown: 0,
+        attackCombo: 0,
+        dashCooldown: 0,
+        dashTimer: 0,
+        invincible: 0,
+        critChance: 0.08,
+        critDamage: 1.8,
+        defense: 0,
+        skin: "default",
+        lastMoveDir: { x: 1, y: 0 },
+        projectileCooldown: 0,
+        projectileDamage: 18,
+        projectileSpeed: 8,
+        weapon: { name: "Wood Sword", damage: 12, speed: 0.9, crit: 0.08 },
+        armor: { name: "Leather Armor", defense: 0 },
+        inventory: { common: 0, rare: 0, epic: 0, legendary: 0, mythic: 0, potion: 0, manaPotion: 0 },
+        upgrades: { hp: 0, speed: 0, damage: 0, armor: 0 },
+        skills: { blast: 0, dash: 0, shield: 0 },
+        stats: { crystals: 0, enemiesKilled: 0, damageDealt: 0, wavesCleared: 0, bossDefeats: 0, dungeonFloors: 0 },
+        achievements: { firstCrystal: false, firstWave: false, bossDefeated: false, dungeonClear: false },
+        questLog: []
+      };
+    }
+
+    function createDefaultState() {
+      return {
+        player: createPlayer(),
+        enemies: [],
+        crystals: [],
+        particles: [],
+        projectiles: [],
+        goldDrops: [],
+        floatingTexts: [],
+        effects: [],
+        quests: [],
+        boss: null,
+        paused: false,
+        showShop: false,
+        showInventory: false,
+        mode: "arena",
+        wave: 1,
+        waveActive: false,
+        waveTimer: 0,
+        screenShake: 0,
+        hitFlash: 0,
+        dungeon: null,
+        highScore: 0,
+        lastSavedAt: 0,
+        autoSaveTimer: 30,
+        message: "A new adventure begins"
+      };
+    }
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+    function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return createDefaultState();
+        const parsed = JSON.parse(raw);
+        const next = createDefaultState();
+        if (parsed.player) {
+          next.player = { ...next.player, ...parsed.player };
+          next.player.inventory = { ...next.player.inventory, ...(parsed.player.inventory || {}) };
+          next.player.upgrades = { ...next.player.upgrades, ...(parsed.player.upgrades || {}) };
+          next.player.skills = { ...next.player.skills, ...(parsed.player.skills || {}) };
+          next.player.stats = { ...next.player.stats, ...(parsed.player.stats || {}) };
+          next.player.achievements = { ...next.player.achievements, ...(parsed.player.achievements || {}) };
+          next.player.weapon = { ...next.player.weapon, ...(parsed.player.weapon || {}) };
+          next.player.armor = { ...next.player.armor, ...(parsed.player.armor || {}) };
+          next.player.questLog = Array.isArray(parsed.player.questLog) ? parsed.player.questLog : [];
+          next.player.attackDamage = next.player.weapon.damage;
+        }
+        next.wave = parsed.wave || 1;
+        next.mode = parsed.mode || "arena";
+        next.paused = Boolean(parsed.paused);
+        next.showShop = Boolean(parsed.showShop);
+        next.showInventory = Boolean(parsed.showInventory);
+        next.waveActive = Boolean(parsed.waveActive);
+        next.dungeon = parsed.dungeon || null;
+        next.boss = parsed.boss || null;
+        next.highScore = Number(parsed.highScore || localStorage.getItem("crystal-hunter-highscore") || 0);
+        next.quests = Array.isArray(parsed.quests) ? parsed.quests : createQuests();
+        next.message = parsed.message || "New adventure started";
+        return next;
+      } catch (error) {
+        console.warn("Save load failed", error);
+        return createDefaultState();
+      }
+    }
+
+    const state = loadState();
+
+    function saveState() {
+      const payload = {
+        player: state.player,
+        wave: state.wave,
+        mode: state.mode,
+        paused: state.paused,
+        showShop: state.showShop,
+        showInventory: state.showInventory,
+        waveActive: state.waveActive,
+        dungeon: state.dungeon,
+        boss: state.boss,
+        highScore: state.highScore,
+        quests: state.quests,
+        message: state.message,
+        lastSavedAt: Date.now()
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem("crystal-hunter-highscore", String(state.highScore));
+      state.lastSavedAt = Date.now();
+    }
+
+    function createQuests() {
+      return [
+        { id: 1, type: "kill", title: "Clear the Hollow", target: 8, progress: 0, reward: 80, complete: false },
+        { id: 2, type: "collect", title: "Gather Crystals", target: 5, progress: 0, reward: 60, complete: false },
+        { id: 3, type: "boss", title: "Defeat the Warden", target: 1, progress: 0, reward: 120, complete: false }
+      ];
+    }
+
+    function resetRun() {
+      const fresh = createDefaultState();
+      fresh.highScore = state.highScore;
+      fresh.quests = createQuests();
+      Object.assign(state, fresh);
+      state.highScore = fresh.highScore;
+      state.quests = fresh.quests;
+      state.player.score = 0;
+      state.player.gold = 0;
+      state.player.attackDamage = state.player.weapon.damage;
+      spawnWave();
+      saveState();
+    }
+
+    function createCrystal() {
+      const roll = Math.random();
+      let rarity;
+      if (roll < 0.5) rarity = RARITY_DATA[0];
+      else if (roll < 0.8) rarity = RARITY_DATA[1];
+      else if (roll < 0.94) rarity = RARITY_DATA[2];
+      else if (roll < 0.985) rarity = RARITY_DATA[3];
+      else rarity = RARITY_DATA[4];
+      return {
+        x: randomRange(50, canvas.width - 50),
+        y: randomRange(70, canvas.height - 70),
+        size: 16,
+        rarity,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function createEnemy(kind = "normal") {
+      const maxHp = kind === "elite" ? 70 + state.wave * 8 : kind === "boss" ? 260 + state.wave * 25 : 40 + state.wave * 5;
+      const speed = kind === "elite" ? 2.4 + state.wave * 0.02 : kind === "boss" ? 1.4 : 1.8 + state.wave * 0.02;
+      const damage = kind === "elite" ? 8 + state.wave : kind === "boss" ? 16 + state.wave : 5 + Math.floor(state.wave / 2);
+      return {
+        x: randomRange(60, canvas.width - 60),
+        y: randomRange(90, canvas.height - 90),
+        size: kind === "boss" ? 42 : kind === "elite" ? 32 : 24,
+        speed,
+        hp: maxHp,
+        maxHp,
+        damage,
+        cooldown: 950,
+        lastHit: 0,
+        flash: 0,
+        alive: true,
+        kind,
+        state: "idle",
+        aggroRange: kind === "boss" ? 240 : 160,
+        attackRange: kind === "boss" ? 70 : 48,
+        wanderAngle: randomRange(0, Math.PI * 2),
+        wanderTimer: randomRange(0.6, 1.8)
+      };
+    }
+
+    function spawnWave() {
+      state.enemies = [];
+      const count = Math.min(16, 4 + Math.floor(state.wave * 1.9) + (state.wave % 5 === 0 ? 2 : 0));
+      const bossWave = state.wave % 5 === 0;
+      for (let i = 0; i < count; i++) {
+        const kind = bossWave && i === 0 ? "boss" : i % 7 === 0 ? "elite" : "normal";
+        state.enemies.push(createEnemy(kind));
+      }
+      state.waveActive = true;
+      state.waveTimer = 0;
+      addFloatingText(canvas.width / 2 - 80, 70, `Wave ${state.wave}`, "#fbbf24", 120);
+      playTone(660, 0.08, "triangle", 0.08);
+      saveState();
+    }
+
+    function addFloatingText(x, y, text, color, life = 80) {
+      state.floatingTexts.push({ x, y, text, color, life, vy: -0.7 });
+    }
+
+    function spawnParticles(x, y, color, count = 16) {
+      for (let i = 0; i < count; i++) {
+        state.particles.push({ x, y, vx: randomRange(-2.8, 2.8), vy: randomRange(-2.8, 2.8), life: 36, color });
+      }
+    }
+
+    function createProjectile(x, y, dir) {
+      return {
+        x,
+        y,
+        vx: dir.x * (state.player.projectileSpeed + state.player.upgrades.damage * 0.4),
+        vy: dir.y * (state.player.projectileSpeed + state.player.upgrades.damage * 0.4),
+        damage: state.player.projectileDamage + state.player.upgrades.damage * 5,
+        life: 70,
+        size: 6,
+        color: "#f8fafc"
+      };
+    }
+
+    function spawnGoldDrop(x, y, value) {
+      state.goldDrops.push({
+        x,
+        y,
+        vx: randomRange(-0.5, 0.5),
+        vy: randomRange(-1.2, -0.4),
+        life: 420,
+        value,
+        size: 8,
+        pulse: randomRange(0, Math.PI * 2)
+      });
+    }
+
+    function performProjectileShot() {
+      if (state.paused || state.player.projectileCooldown > 0) return;
+      state.player.projectileCooldown = 180;
+      const dir = state.player.lastMoveDir && (Math.abs(state.player.lastMoveDir.x) > 0.01 || Math.abs(state.player.lastMoveDir.y) > 0.01)
+        ? state.player.lastMoveDir
+        : { x: 1, y: 0 };
+      state.projectiles.push(createProjectile(state.player.x + state.player.size / 2, state.player.y + state.player.size / 2, dir));
+      spawnParticles(state.player.x + 10, state.player.y + 10, "#38bdf8", 8);
+      playTone(860, 0.04, "triangle", 0.05);
+      saveState();
+    }
+
+    function updateProjectiles(delta) {
+      for (let i = state.projectiles.length - 1; i >= 0; i--) {
+        const projectile = state.projectiles[i];
+        projectile.x += projectile.vx;
+        projectile.y += projectile.vy;
+        projectile.life -= delta;
+        if (projectile.life <= 0 || projectile.x < -20 || projectile.x > canvas.width + 20 || projectile.y < -20 || projectile.y > canvas.height + 20) {
+          state.projectiles.splice(i, 1);
+          continue;
+        }
+        for (let j = state.enemies.length - 1; j >= 0; j--) {
+          const enemy = state.enemies[j];
+          if (!enemy.alive) continue;
+          const dx = projectile.x - (enemy.x + enemy.size / 2);
+          const dy = projectile.y - (enemy.y + enemy.size / 2);
+          if (Math.hypot(dx, dy) < enemy.size / 2 + 4) {
+            applyDamage(enemy, projectile.damage);
+            spawnParticles(projectile.x, projectile.y, "#f8fafc", 6);
+            state.projectiles.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    function updateGoldDrops(delta) {
+      for (let i = state.goldDrops.length - 1; i >= 0; i--) {
+        const drop = state.goldDrops[i];
+        drop.x += drop.vx;
+        drop.y += drop.vy;
+        drop.life -= delta;
+        drop.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (drop.x + drop.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (drop.y + drop.size / 2);
+        if (Math.hypot(dx, dy) < state.player.size / 2 + drop.size / 2) {
+          state.player.gold += drop.value;
+          addFloatingText(drop.x, drop.y - 4, `+${drop.value}`, "#facc15", 60);
+          spawnParticles(drop.x, drop.y, "#facc15", 8);
+          state.goldDrops.splice(i, 1);
+          continue;
+        }
+        if (drop.life <= 0) state.goldDrops.splice(i, 1);
+      }
+    }
+
+    function playTone(frequency, duration, type = "sine", volume = 0.04) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    }
+
+    function startMusic() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (musicGain) return;
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.01;
+      musicGain.connect(audioCtx.destination);
+      musicOsc = audioCtx.createOscillator();
+      musicOsc.type = "sine";
+      musicOsc.frequency.value = 220;
+      musicOsc.connect(musicGain);
+      musicOsc.start();
+    }
+
+    function getAimDirection() {
+      const px = state.player.x + state.player.size / 2;
+      const py = state.player.y + state.player.size / 2;
+      const dx = mouse.x - px;
+      const dy = mouse.y - py;
+      const dist = Math.hypot(dx, dy) || 1;
+      return { x: dx / dist, y: dy / dist };
+    }
+
+    function applyDamage(enemy, amount) {
+      enemy.hp -= amount;
+      enemy.flash = 0.2;
+      addFloatingText(enemy.x + 4, enemy.y - 4, `${Math.round(amount)}`, "#fda4af", 65);
+      if (enemy.hp <= 0) killEnemy(enemy);
+    }
+
+    function performAttack() {
+      if (state.paused || state.player.attackCooldown > 0) return;
+      state.player.attackCooldown = 240 - Math.min(80, state.player.level * 6);
+      const aim = getAimDirection();
+      const comboBonus = state.player.attackCombo % 3 === 0 ? 1.15 : 1;
+      state.player.attackCombo = (state.player.attackCombo + 1) % 4;
+      let damage = state.player.attackDamage * comboBonus;
+      const crit = Math.random() < state.player.critChance;
+      if (crit) damage *= state.player.critDamage;
+      state.player.stats.damageDealt += damage;
+      spawnParticles(state.player.x + 10, state.player.y + 10, crit ? "#fbbf24" : "#f8fafc", 10);
+      playTone(crit ? 1200 : 900, 0.05, "square", 0.06);
+      state.effects.push({ x: state.player.x + 4, y: state.player.y + 4, life: 10, color: crit ? "#fde68a" : "#e2e8f0" });
+      state.enemies.forEach((enemy) => {
+        const ex = enemy.x + enemy.size / 2;
+        const ey = enemy.y + enemy.size / 2;
+        const dx = ex - (state.player.x + state.player.size / 2 + aim.x * 20);
+        const dy = ey - (state.player.y + state.player.size / 2 + aim.y * 20);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.attackRange + enemy.size / 2) {
+          applyDamage(enemy, damage);
+        }
+      });
+      state.hitFlash = 0.14;
+      state.screenShake = 0.16;
+      saveState();
+    }
+
+    function performSkill() {
+      if (state.paused || state.player.mana < 14) return;
+      state.player.mana = Math.max(0, state.player.mana - 14);
+      const damage = 20 + state.player.level * 3 + state.player.skills.blast * 6;
+      const aim = getAimDirection();
+      state.effects.push({ x: state.player.x - 10, y: state.player.y - 10, life: 18, color: "#38bdf8" });
+      spawnParticles(state.player.x + 10, state.player.y + 10, "#38bdf8", 24);
+      state.enemies.forEach((enemy) => {
+        const dx = enemy.x + enemy.size / 2 - (state.player.x + state.player.size / 2 + aim.x * 40);
+        const dy = enemy.y + enemy.size / 2 - (state.player.y + state.player.size / 2 + aim.y * 40);
+        const dist = Math.hypot(dx, dy);
+        if (dist < 140 + state.player.level * 8) {
+          applyDamage(enemy, damage);
+        }
+      });
+      playTone(540, 0.08, "triangle", 0.08);
+      saveState();
+    }
+
+    function levelUp() {
+      state.player.level += 1;
+      state.player.exp = 0;
+      state.player.expToNext = Math.round(state.player.expToNext * 1.18);
+      state.player.maxHp += 10;
+      state.player.maxMana += 8;
+      state.player.maxStamina += 8;
+      state.player.hp = state.player.maxHp;
+      state.player.mana = state.player.maxMana;
+      state.player.stamina = state.player.maxStamina;
+      state.player.attackDamage += 2;
+      state.player.weapon.damage = state.player.attackDamage;
+      state.player.upgrades.hp += 1;
+      addFloatingText(110, 132, `Level ${state.player.level}`, "#fbbf24", 110);
+      spawnParticles(120, 120, "#fbbf24", 40);
+      playTone(740, 0.12, "triangle", 0.08);
+      saveState();
+    }
+
+    function killEnemy(enemy) {
+      enemy.alive = false;
+      state.player.stats.enemiesKilled += 1;
+      state.player.stats.crystals += 1;
+      state.player.gold += 10 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 60 : 0);
+      state.player.score += 25 + (enemy.kind === "elite" ? 40 : 0) + (enemy.kind === "boss" ? 140 : 0);
+      const dropValue = Math.round(randomRange(enemy.kind === "boss" ? 16 : 5, enemy.kind === "boss" ? 24 : 15));
+      spawnGoldDrop(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2, dropValue);
+      state.player.exp += 18 + (enemy.kind === "elite" ? 24 : 0) + (enemy.kind === "boss" ? 45 : 0);
+      state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1.6);
+      state.player.mana = Math.min(state.player.maxMana, state.player.mana + 2.6);
+      state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 6);
+      if (state.player.exp >= state.player.expToNext) levelUp();
+      addFloatingText(enemy.x, enemy.y - 8, "+Gold", "#34d399", 70);
+      spawnParticles(enemy.x, enemy.y, enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#22c55e", enemy.kind === "boss" ? 48 : 18);
+      if (Math.random() < 0.2) {
+        const crystal = createCrystal();
+        crystal.x = enemy.x;
+        crystal.y = enemy.y;
+        state.crystals.push(crystal);
+      }
+      if (enemy.kind === "boss") {
+        state.player.achievements.bossDefeated = true;
+        state.player.stats.bossDefeats += 1;
+        state.message = "The Warden has fallen";
+        addFloatingText(140, 160, "Boss Defeated", "#fbbf24", 120);
+      }
+      updateQuests(enemy.kind === "boss" ? "boss" : "kill");
+      playTone(440, 0.06, "sawtooth", 0.05);
+      saveState();
+    }
+
+    function updateQuests(type) {
+      state.quests.forEach((quest) => {
+        if (quest.complete) return;
+        if (type === "kill" && quest.type === "kill") {
+          quest.progress += 1;
+        } else if (type === "collect" && quest.type === "collect") {
+          quest.progress += 1;
+        } else if (type === "boss" && quest.type === "boss") {
+          quest.progress += 1;
+        }
+        if (quest.progress >= quest.target) {
+          quest.complete = true;
+          state.player.gold += quest.reward;
+          state.message = `${quest.title} complete`;
+          addFloatingText(140, 190, `${quest.title} Complete`, "#34d399", 110);
+        }
+      });
+    }
+
+    function handleInput(delta) {
+      const moveX = (keyState["arrowright"] || keyState["d"] || pointerState.right ? 1 : 0) - (keyState["arrowleft"] || keyState["a"] || pointerState.left ? 1 : 0);
+      const moveY = (keyState["arrowdown"] || keyState["s"] || pointerState.down ? 1 : 0) - (keyState["arrowup"] || keyState["w"] || pointerState.up ? 1 : 0);
+      const len = Math.hypot(moveX, moveY) || 1;
+      const inputVector = { x: moveX / len, y: moveY / len };
+      if (moveX || moveY) {
+        state.player.lastMoveDir = inputVector;
+        const speedFactor = keyState["shift"] && state.player.stamina > 10 ? 1.5 : 1;
+        if (keyState["shift"] && state.player.stamina > 10) {
+          state.player.stamina = Math.max(0, state.player.stamina - 8);
+        } else {
+          state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.35);
+        }
+        state.player.x += inputVector.x * state.player.speed * speedFactor;
+        state.player.y += inputVector.y * state.player.speed * speedFactor;
+      } else {
+        state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.45);
+      }
+      state.player.projectileCooldown = Math.max(0, state.player.projectileCooldown - delta * 0.001);
+      state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
+      state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
+      state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
+      state.player.dashCooldown = Math.max(0, state.player.dashCooldown - delta * 0.001);
+      state.player.invincible = Math.max(0, state.player.invincible - delta * 0.001);
+      state.hitFlash = Math.max(0, state.hitFlash - delta * 0.001);
+      state.screenShake = Math.max(0, state.screenShake - delta * 0.001);
+      if (keyState["shift"] && state.player.dashCooldown <= 0 && (moveX || moveY) && !state.paused) {
+        state.player.dashCooldown = 700;
+        state.player.dashTimer = 110;
+        state.player.speed = 5.8;
+        state.player.skills.dash += 1;
+        playTone(600, 0.04, "square", 0.05);
+        addFloatingText(state.player.x, state.player.y - 8, "Dash", "#fbbf24", 50);
+      }
+      if (state.player.dashTimer > 0) {
+        state.player.dashTimer -= delta;
+        if (state.player.dashTimer <= 0) state.player.speed = 4.2;
+      }
+      const shootPressed = keyState[" "] || keyState["space"];
+      if (shootPressed && !state.paused) performProjectileShot();
+      if (pointerState.attack && !state.paused) performAttack();
+      if (keyState["e"] && !state.paused) enterDungeon();
+    }
+
+    function updateParticles(delta) {
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= delta * 0.06;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+        const t = state.floatingTexts[i];
+        t.y += t.vy * delta * 0.06;
+        t.life -= delta;
+        if (t.life <= 0) state.floatingTexts.splice(i, 1);
+      }
+    }
+
+    function updateEffects(delta) {
+      for (let i = state.effects.length - 1; i >= 0; i--) {
+        const effect = state.effects[i];
+        effect.life -= delta * 0.06;
+        if (effect.life <= 0) state.effects.splice(i, 1);
+      }
+    }
+
+    function updateCrystals() {
+      for (let i = state.crystals.length - 1; i >= 0; i--) {
+        const crystal = state.crystals[i];
+        crystal.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (crystal.x + crystal.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (crystal.y + crystal.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + crystal.size / 2) {
+          const reward = crystal.rarity.value;
+          state.player.gold += reward;
+          state.player.score += reward;
+          state.player.inventory[crystal.rarity.name] += 1;
+          state.player.stats.crystals += 1;
+          state.player.achievements.firstCrystal = true;
+          updateQuests("collect");
+          addFloatingText(crystal.x, crystal.y - 6, `+${reward} Gold`, crystal.rarity.color, 70);
+          spawnParticles(crystal.x, crystal.y, crystal.rarity.color, 20);
+          playTone(580, 0.06, "triangle", 0.05);
+          state.crystals.splice(i, 1);
+          state.crystals.push(createCrystal());
+          saveState();
+        }
+      }
+    }
+
+    function updateEnemyAI(enemy, delta) {
+      const px = state.player.x + state.player.size / 2;
+      const py = state.player.y + state.player.size / 2;
+      const ex = enemy.x + enemy.size / 2;
+      const ey = enemy.y + enemy.size / 2;
+      const dist = Math.hypot(px - ex, py - ey);
+      const shouldChase = enemy.kind === "boss" ? dist < enemy.aggroRange : dist < enemy.aggroRange - 30 + state.wave * 8;
+      enemy.state = shouldChase ? "chase" : "wander";
+      if (enemy.state === "chase") {
+        const dx = px - ex;
+        const dy = py - ey;
+        const length = Math.hypot(dx, dy) || 1;
+        const chaseSpeed = enemy.speed + (enemy.kind === "boss" ? 0.15 : 0.08) + state.wave * 0.01;
+        enemy.x += (dx / length) * chaseSpeed;
+        enemy.y += (dy / length) * chaseSpeed;
+      } else {
+        enemy.wanderTimer -= delta * 0.001;
+        if (enemy.wanderTimer <= 0) {
+          enemy.wanderTimer = randomRange(0.6, 1.8);
+          enemy.wanderAngle += randomRange(-0.9, 0.9);
+        }
+        enemy.x += Math.cos(enemy.wanderAngle) * (enemy.speed * 0.55);
+        enemy.y += Math.sin(enemy.wanderAngle) * (enemy.speed * 0.55);
+      }
+      const hitDist = Math.hypot(state.player.x - enemy.x, state.player.y - enemy.y);
+      if (hitDist < state.player.size / 2 + enemy.size / 2 && performance.now() - enemy.lastHit >= enemy.cooldown) {
+        const damage = Math.max(4, enemy.damage - state.player.armor.defense - state.player.upgrades.armor * 1.4);
+        state.player.hp -= damage;
+        state.player.invincible = 180;
+        enemy.lastHit = performance.now();
+        addFloatingText(state.player.x + 4, state.player.y - 6, `-${Math.round(damage)}`, "#f87171", 55);
+        playTone(220, 0.04, "sine", 0.05);
+        state.hitFlash = 0.2;
+        state.screenShake = 0.14;
+        if (state.player.hp <= 0) gameOver();
+      }
+    }
+
+    function updateEnemies(delta) {
+      for (let i = state.enemies.length - 1; i >= 0; i--) {
+        const enemy = state.enemies[i];
+        if (!enemy.alive) {
+          state.enemies.splice(i, 1);
+          continue;
+        }
+        enemy.flash = Math.max(0, enemy.flash - delta * 0.001);
+        updateEnemyAI(enemy, delta);
+      }
+    }
+
+    function updateWave(delta) {
+      if (!state.waveActive) {
+        state.waveTimer -= delta * 0.001;
+        if (state.waveTimer <= 0) {
+          state.wave += 1;
+          state.player.stats.wavesCleared += 1;
+          state.player.achievements.firstWave = true;
+          state.player.gold += 20;
+          spawnWave();
+        }
+      } else if (state.enemies.length === 0) {
+        state.waveActive = false;
+        state.waveTimer = 1.6;
+        state.player.gold += 30 + state.wave * 6;
+        state.player.score += 90 + state.wave * 10;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+        state.player.mana = Math.min(state.player.maxMana, state.player.mana + 6);
+        addFloatingText(110, 92, `Wave Clear +${30 + state.wave * 6} Gold`, "#34d399", 100);
+        playTone(880, 0.12, "square", 0.08);
+        saveState();
+      }
+    }
+
+    function createSecretChest() {
+      return {
+        x: randomRange(90, canvas.width - 110),
+        y: randomRange(90, canvas.height - 110),
+        size: 24,
+        gold: 180 + state.wave * 40,
+        active: true,
+        pulse: randomRange(0, Math.PI * 2)
+      };
+    }
+
+    function enterDungeon() {
+      if (state.mode === "dungeon") return;
+      state.mode = "dungeon";
+      state.dungeon = { floor: 1 + state.player.level, rooms: [{ x: 1, y: 1, w: 2, h: 2 }], progress: 0, chest: createSecretChest() };
+      state.player.stats.dungeonFloors += 1;
+      state.player.achievements.dungeonClear = true;
+      state.message = "Dungeon entered";
+      addFloatingText(120, 220, "Entered Dungeon", "#fbbf24", 100);
+      saveState();
+    }
+
+    function update(delta) {
+      if (state.paused || state.showShop || state.showInventory) return;
+      handleInput(delta);
+      updateParticles(delta);
+      updateFloatingTexts(delta);
+      updateEffects(delta);
+      updateCrystals();
+      updateProjectiles(delta);
+      updateGoldDrops(delta);
+      updateEnemies(delta);
+      updateWave(delta);
+      if (state.mode === "dungeon") updateDungeon(delta);
+      if (state.player.hp <= 0) gameOver();
+      state.autoSaveTimer -= delta * 0.001;
+      if (state.autoSaveTimer <= 0) {
+        saveState();
+        state.autoSaveTimer = 30;
+      }
+    }
+
+    function gameOver() {
+      state.highScore = Math.max(state.highScore, state.player.score);
+      saveState();
+      playTone(180, 0.2, "sawtooth", 0.08);
+      alert("You fell in battle. The run is over. Press OK to start again.");
+      resetRun();
+    }
+
+    function buyUpgrade(id) {
+      const costs = { speed: 100, maxHp: 150, damage: 200 };
+      if (!costs[id] || state.player.gold < costs[id]) return;
+      state.player.gold -= costs[id];
+      if (id === "speed") {
+        state.player.speed += 0.5;
+        state.player.upgrades.speed += 1;
+      } else if (id === "maxHp") {
+        state.player.maxHp += 20;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 20);
+        state.player.upgrades.hp += 1;
+      } else if (id === "damage") {
+        state.player.attackDamage += 5;
+        state.player.weapon.damage = state.player.attackDamage;
+        state.player.projectileDamage += 5;
+        state.player.upgrades.damage += 1;
+      }
+      addFloatingText(state.player.x, state.player.y - 8, "Upgrade", "#facc15", 60);
+      playTone(520, 0.06, "triangle", 0.06);
+      saveState();
+    }
+
+    function usePotion(type) {
+      if (type === "potion" && state.player.inventory.potion > 0) {
+        state.player.inventory.potion -= 1;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 24);
+      }
+      if (type === "manaPotion" && state.player.inventory.manaPotion > 0) {
+        state.player.inventory.manaPotion -= 1;
+        state.player.mana = Math.min(state.player.maxMana, state.player.mana + 20);
+      }
+      saveState();
+    }
+
+    function toggleShop() {
+      state.showShop = !state.showShop;
+      state.showInventory = false;
+      state.paused = false;
+      saveState();
+    }
+
+    function toggleInventory() {
+      state.showInventory = !state.showInventory;
+      saveState();
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      saveState();
+    }
+
+    function updateDungeon(delta) {
+      if (!state.dungeon) return;
+      state.dungeon.progress += delta * 0.001;
+      if (state.dungeon.chest && state.dungeon.chest.active) {
+        state.dungeon.chest.pulse += 0.08;
+        const dx = state.player.x + state.player.size / 2 - (state.dungeon.chest.x + state.dungeon.chest.size / 2);
+        const dy = state.player.y + state.player.size / 2 - (state.dungeon.chest.y + state.dungeon.chest.size / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist < state.player.size / 2 + state.dungeon.chest.size / 2) {
+          state.player.gold += state.dungeon.chest.gold;
+          state.player.score += state.dungeon.chest.gold;
+          state.message = "Secret chest found";
+          addFloatingText(state.dungeon.chest.x, state.dungeon.chest.y - 8, `+${state.dungeon.chest.gold} Gold`, "#facc15", 90);
+          spawnParticles(state.dungeon.chest.x, state.dungeon.chest.y, "#facc15", 24);
+          state.dungeon.chest.active = false;
+          saveState();
+        }
+      }
+      if (state.dungeon.progress > 7) {
+        state.player.level += 1;
+        state.player.gold += 80;
+        state.player.score += 180;
+        state.player.stats.dungeonFloors += 1;
+        addFloatingText(120, 250, "Dungeon Cleared", "#fbbf24", 110);
+        state.mode = "arena";
+        state.dungeon = null;
+        saveState();
+      }
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, "#030712");
+      gradient.addColorStop(1, "#111827");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < 40; i++) {
+        const x = (i * 97 + state.wave * 3) % canvas.width;
+        const y = (i * 67 + state.wave * 5) % canvas.height;
+        ctx.fillStyle = i % 4 === 0 ? "rgba(255,255,255,0.15)" : "rgba(56,189,248,0.12)";
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+
+    function drawHud() {
+      const player = state.player;
+      const hpRatio = player.hp / player.maxHp;
+      const manaRatio = player.mana / player.maxMana;
+      const expRatio = player.exp / player.expToNext;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+      ctx.fillRect(12, 12, 430, 170);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(12, 12, 430, 170);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText(`HP ${Math.floor(player.hp)} / ${Math.floor(player.maxHp)}`, 24, 40);
+      ctx.fillText(`Mana ${Math.floor(player.mana)} / ${Math.floor(player.maxMana)}`, 24, 64);
+      ctx.fillText(`Stamina ${Math.floor(player.stamina)} / ${Math.floor(player.maxStamina)}`, 24, 88);
+      ctx.fillText(`Level ${player.level}`, 24, 112);
+      ctx.fillText(`EXP ${player.exp} / ${player.expToNext}`, 24, 136);
+      ctx.fillText(`Gold ${player.gold} • Wave ${state.wave}`, 24, 160);
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(170, 36, 240, 12);
+      ctx.fillStyle = "#ef4444";
+      ctx.fillRect(170, 36, 240 * hpRatio, 12);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillRect(170, 56, 240 * expRatio, 8);
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillRect(170, 74, 240 * manaRatio, 8);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Weapon: ${player.weapon.name}`, 170, 150);
+      ctx.fillText(`Skin: ${player.skin}`, 170, 168);
+      ctx.restore();
+      if (state.boss) {
+        ctx.save();
+        ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+        ctx.fillRect(12, 520, 430, 68);
+        ctx.strokeStyle = "#fb923c";
+        ctx.strokeRect(12, 520, 430, 68);
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(`Boss: ${state.boss.name}`, 24, 548);
+        ctx.fillStyle = "#334155";
+        ctx.fillRect(24, 556, 400, 10);
+        ctx.fillStyle = "#ef4444";
+        ctx.fillRect(24, 556, 400 * (state.boss.hp / state.boss.maxHp), 10);
+        ctx.restore();
+      }
+    }
+
+    function drawInventoryPanel() {
+      if (!state.showInventory) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.92)";
+      ctx.fillRect(700, 12, 240, 220);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.strokeRect(700, 12, 240, 220);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 16px Segoe UI";
+      ctx.fillText("Inventory", 716, 36);
+      ctx.font = "14px Segoe UI";
+      ctx.fillText(`Crystals: ${state.player.inventory.common} / ${state.player.inventory.rare} / ${state.player.inventory.epic} / ${state.player.inventory.legendary} / ${state.player.inventory.mythic}`, 716, 62);
+      ctx.fillText(`Potions: ${state.player.inventory.potion}`, 716, 86);
+      ctx.fillText(`Mana Potions: ${state.player.inventory.manaPotion}`, 716, 110);
+      ctx.fillText(`Weapon: ${state.player.weapon.name}`, 716, 134);
+      ctx.fillText(`Armor: ${state.player.armor.name}`, 716, 158);
+      ctx.fillText("Use 1 / 2 to consume", 716, 182);
+      ctx.restore();
+    }
+
+    function drawShopWindow() {
+      if (!state.showShop) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
+      ctx.fillRect(220, 120, 520, 380);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.strokeRect(220, 120, 520, 380);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 24px Segoe UI";
+      ctx.fillText("Upgrade Shop", 240, 158);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("1) +0.5 Speed • 100 Gold", 240, 200);
+      ctx.fillText("2) +20 Max HP • 150 Gold", 240, 228);
+      ctx.fillText("3) +5 Projectile Damage • 200 Gold", 240, 256);
+      ctx.fillText("4) Emerald Green • 120 Gold", 240, 292);
+      ctx.fillText("5) Ruby Red • 180 Gold", 240, 320);
+      ctx.fillText("6) Royal Gold • 260 Gold", 240, 348);
+      ctx.fillText("P = Close • 1/2/3 buy upgrades", 240, 384);
+      ctx.font = "14px Segoe UI";
+      ctx.fillStyle = "#cbd5e1";
+      ctx.fillText("Emerald Green: Hope and concealment.", 240, 410);
+      ctx.fillText("Ruby Red: Fury and relentless attack power.", 240, 432);
+      ctx.fillText("Royal Gold: Royal fortune and treasure luck.", 240, 454);
+      ctx.restore();
+    }
+
+    function drawPauseWindow() {
+      if (!state.paused) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+      ctx.fillRect(250, 180, 460, 240);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.strokeRect(250, 180, 460, 240);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 30px Segoe UI";
+      ctx.fillText("Paused", 386, 228);
+      ctx.font = "16px Segoe UI";
+      ctx.fillText("R = Resume", 300, 278);
+      ctx.fillText("S = Save", 300, 306);
+      ctx.fillText("T = Reset", 300, 334);
+      ctx.restore();
+    }
+
+    function buySkin(id) {
+      const skin = SKINS.find((entry) => entry.id === id);
+      if (!skin) return;
+      if (state.player.gold < skin.cost) return;
+      state.player.gold -= skin.cost;
+      state.player.skin = skin.id;
+      state.message = `${skin.label} skin equipped`;
+      addFloatingText(120, 200, `${skin.label} Skin`, "#fbbf24", 90);
+      playTone(540, 0.05, "triangle", 0.06);
+      saveState();
+    }
+
+    function drawWorld() {
+      drawBackground();
+      if (state.dungeon?.chest && state.dungeon.chest.active) {
+        const chest = state.dungeon.chest;
+        ctx.save();
+        ctx.translate(chest.x + chest.size / 2, chest.y + chest.size / 2);
+        ctx.scale(1 + Math.sin(chest.pulse) * 0.04, 1 + Math.sin(chest.pulse) * 0.04);
+        ctx.fillStyle = "#facc15";
+        ctx.fillRect(-chest.size / 2, -chest.size / 2, chest.size, chest.size);
+        ctx.fillStyle = "#92400e";
+        ctx.fillRect(-chest.size / 2 + 4, -chest.size / 2 + 10, chest.size - 8, 8);
+        ctx.restore();
+      }
+      state.crystals.forEach((crystal) => {
+        ctx.save();
+        ctx.translate(crystal.x + crystal.size / 2, crystal.y + crystal.size / 2);
+        ctx.scale(1 + Math.sin(crystal.pulse) * 0.05, 1 + Math.sin(crystal.pulse) * 0.05);
+        ctx.fillStyle = crystal.rarity.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, crystal.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = crystal.rarity.glow;
+        ctx.beginPath();
+        ctx.arc(0, 0, crystal.size + 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      state.enemies.forEach((enemy) => {
+        ctx.save();
+        ctx.translate(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2);
+        ctx.globalAlpha = enemy.flash > 0 ? 0.7 : 1;
+        ctx.fillStyle = enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#ef4444";
+        ctx.fillRect(-enemy.size / 2, -enemy.size / 2, enemy.size, enemy.size);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
+        ctx.restore();
+      });
+      state.projectiles.forEach((projectile) => {
+        ctx.save();
+        ctx.translate(projectile.x, projectile.y);
+        ctx.fillStyle = projectile.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, projectile.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      state.goldDrops.forEach((drop) => {
+        ctx.save();
+        ctx.translate(drop.x + drop.size / 2, drop.y + drop.size / 2);
+        ctx.scale(1 + Math.sin(drop.pulse) * 0.08, 1 + Math.sin(drop.pulse) * 0.08);
+        ctx.fillStyle = "#facc15";
+        ctx.beginPath();
+        ctx.arc(0, 0, drop.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const skin = SKINS.find((entry) => entry.id === state.player.skin) || SKINS[0];
+      ctx.fillStyle = skin.color;
+      ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(state.player.x + 6, state.player.y + 6, 10, 10);
+      state.particles.forEach((p) => {
+        ctx.globalAlpha = Math.max(0, p.life / 36);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+      state.effects.forEach((effect) => {
+        ctx.fillStyle = effect.color;
+        ctx.fillRect(effect.x, effect.y, 8, 8);
+      });
+      state.floatingTexts.forEach((t) => {
+        ctx.fillStyle = t.color;
+        ctx.font = "bold 14px Segoe UI";
+        ctx.fillText(t.text, t.x, t.y);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawWorld();
+      drawHud();
+      drawInventoryPanel();
+      drawShopWindow();
+      drawPauseWindow();
+    }
+
+    function loop(timestamp) {
+      const delta = Math.min(32, timestamp - lastTime || 16);
+      lastTime = timestamp;
+      update(delta);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      keyState[key] = true;
+      if ([" ", "space"].includes(key)) event.preventDefault();
+      if (key === "escape") { event.preventDefault(); togglePause(); }
+      if (key === "p" || key === "b") toggleShop();
+      if (key === "i") toggleInventory();
+      if (key === "r" && state.paused) state.paused = false;
+      if (key === "s" && state.paused) saveState();
+      if (key === "t" && state.paused) resetRun();
+      if (key === "1" && state.showShop) buyUpgrade("speed");
+      if (key === "2" && state.showShop) buyUpgrade("maxHp");
+      if (key === "3" && state.showShop) buyUpgrade("damage");
+      if (key === "4" && state.showShop) buySkin("emerald");
+      if (key === "5" && state.showShop) buySkin("ruby");
+      if (key === "6" && state.showShop) buySkin("gold");
+      if (key === "e") enterDungeon();
+      if (key === "q") performSkill();
+    });
+
+    document.addEventListener("keyup", (event) => {
+      keyState[event.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener("mousemove", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      mouse.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+    });
+
+    canvas.addEventListener("mousedown", (event) => {
+      if (event.button === 0) pointerState.attack = true;
+      if (event.button === 2) {
+        event.preventDefault();
+        performSkill();
+      }
+    });
+
+    canvas.addEventListener("mouseup", (event) => {
+      if (event.button === 0) pointerState.attack = false;
+    });
+
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+    window.addEventListener("beforeunload", saveState);
+
+    if (!state.crystals.length) {
+      for (let i = 0; i < 6; i++) state.crystals.push(createCrystal());
+    }
+    if (!state.enemies.length && !state.waveActive) spawnWave();
+    if (!state.quests.length) state.quests = createQuests();
+    if (state.wave % 5 === 0) state.boss = { name: "Warden", hp: 260, maxHp: 260 };
+    startMusic();
+    saveState();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+
+# Installation
+
+## Run Locally
+1. Open the project folder in a browser.
+2. Launch index.html directly or serve the folder with a simple static server.
+3. If needed, use a local server such as Python's built-in HTTP server.
+
+## Browser Requirements
+- Modern desktop browser
+- JavaScript enabled
+- LocalStorage enabled
+
+# Item System
+
+## Current Items
+- Crystals with rarity tiers
+- Potions and mana potions
+- Shop purchases for upgrades and skins
+
+## Item Design Goals
+Items should support progression, reward feedback, and short-term tactical choices.
+
+## Future Ideas
+Introduce consumables with unique effects, rare loot drops, and gear rarity tiers.
+
+# Performance
+
+## Current Status
+The prototype is lightweight and should perform well on most modern desktop browsers.
+
+## Optimization Areas
+- Keep the number of active particles manageable
+- Avoid excessive object creation in the game loop
+- Monitor frame rate during long play sessions
+
+## Future Improvements
+Introduce object pooling and more efficient update passes if content expands significantly.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crystal Hunter Play</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family:Segoe UI, Tahoma, sans-serif; background:#020617; color:#f8fafc; min-height:100vh; display:grid; place-items:center; padding:12px; }
+    .panel { width:min(100%, 1040px); background:rgba(2,6,23,.9); border:1px solid #38bdf8; border-radius:16px; padding:12px; box-shadow:0 18px 45px rgba(0,0,0,.35); }
+    .top { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+    .lang { display:flex; gap:8px; flex-wrap:wrap; }
+    button { border:0; border-radius:999px; padding:8px 12px; background:#38bdf8; color:white; cursor:pointer; }
+    button.secondary { background:#475569; }
+    canvas { width:100%; height:auto; display:block; border-radius:12px; background:#07111f; border:1px solid #4f8cff; touch-action:none; }
+    .hint { text-align:center; color:#cbd5e1; margin-top:8px; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="top">
+      <div>
+        <div id="title">Crystal Hunter</div>
+        <div id="subtitle">Lightweight browser game</div>
+      </div>
+      <div class="lang">
+        <button class="secondary" onclick="setLang('en')">EN</button>
+        <button class="secondary" onclick="setLang('th')">TH</button>
+        <button class="secondary" onclick="setLang('ja')">JA</button>
+        <button class="secondary" onclick="setLang('zh')">ZH</button>
+      </div>
+    </div>
+    <canvas id="game" width="960" height="600"></canvas>
+    <div class="hint" id="hint">Move with WASD / Arrow keys • Attack with Space • Collect crystals • Press R to restart</div>
+  </div>
+  <script>
+    const langData = {
+      en: {title:'Crystal Hunter', subtitle:'Lightweight browser game', hint:'Move with WASD / Arrow keys • Attack with Space • Collect crystals • Press R to restart'},
+      th: {title:'คริสตัล ฮันเตอร์', subtitle:'เกมเบราว์เซอร์ที่เบาและเล่นง่าย', hint:'เดินด้วย WASD / ลูกศร • โจมตีด้วย Space • เก็บคริสตัล • กด R เพื่อเริ่มใหม่'},
+      ja: {title:'クリスタルハンター', subtitle:'軽量なブラウザゲーム', hint:'WASD / 矢印キーで移動 • Spaceで攻撃 • クリスタルを集める • Rでリスタート'},
+      zh: {title:'水晶猎人', subtitle:'轻量网页游戏', hint:'用 WASD / 方向键移动 • 用 Space 攻击 • 收集水晶 • 按 R 重新开始'}
+    };
+    let lang='en';
+    const state={player:{x:120,y:120,size:24,hp:100,maxHp:100,gold:0,score:0,attack:12,speed:4.2}, enemies:[], crystals:[], particles:[], texts:[], wave:1, paused:false};
+    const keys={};
+    const canvas=document.getElementById('game');
+    const ctx=canvas.getContext('2d');
+    function setLang(code){ lang=code; document.getElementById('title').textContent=langData[code].title; document.getElementById('subtitle').textContent=langData[code].subtitle; document.getElementById('hint').textContent=langData[code].hint; }
+    function rand(a,b){return Math.random()*(b-a)+a;}
+    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+    function createCrystal(){return {x:rand(40,canvas.width-40),y:rand(60,canvas.height-60),size:16,pulse:rand(0,Math.PI*2),color:'#38bdf8'};}
+    function createEnemy(){return {x:rand(80,canvas.width-80),y:rand(90,canvas.height-90),size:24,hp:30,maxHp:30,speed:1.3};}
+    function spawnWave(){ state.enemies=[]; for(let i=0;i<4+state.wave;i++) state.enemies.push(createEnemy()); }
+    function addText(x,y,text,color){ state.texts.push({x,y,text,color,life:70,vy:-0.8}); }
+    function update(dt){ const mx=(keys['ArrowRight']||keys['d']?1:0)-(keys['ArrowLeft']||keys['a']?1:0); const my=(keys['ArrowDown']||keys['s']?1:0)-(keys['ArrowUp']||keys['w']?1:0); const len=Math.hypot(mx,my)||1; if(mx||my){ state.player.x += (mx/len)*state.player.speed; state.player.y += (my/len)*state.player.speed; }
+      state.player.x=clamp(state.player.x,0,canvas.width-state.player.size); state.player.y=clamp(state.player.y,0,canvas.height-state.player.size);
+      state.enemies.forEach(e=>{ const dx=state.player.x+state.player.size/2-(e.x+e.size/2); const dy=state.player.y+state.player.size/2-(e.y+e.size/2); const dist=Math.hypot(dx,dy)||1; e.x += (dx/dist)*e.speed; e.y += (dy/dist)*e.speed; if(Math.hypot(state.player.x-e.x, state.player.y-e.y)<24){ state.player.hp-=1; if(state.player.hp<=0){state.player.hp=100; state.player.gold=0; state.player.score=0;}} });
+      for(let i=state.crystals.length-1;i>=0;i--){ const c=state.crystals[i]; if(Math.hypot(state.player.x+state.player.size/2-(c.x+c.size/2), state.player.y+state.player.size/2-(c.y+c.size/2))<20){ state.player.gold+=10; state.player.score+=10; addText(c.x,c.y,'+10','#facc15'); state.crystals.splice(i,1); state.crystals.push(createCrystal()); }}
+      for(let i=state.texts.length-1;i>=0;i--){ const t=state.texts[i]; t.y += t.vy*dt*0.06; t.life-=dt; if(t.life<=0) state.texts.splice(i,1); }
+      if((keys[' ']||keys['Space']) && !state.lastAttack){ state.enemies.forEach(e=>{if(Math.hypot(state.player.x-e.x,state.player.y-e.y)<42){e.hp-=state.player.attack; if(e.hp<=0){state.player.gold+=15; state.player.score+=20; addText(e.x,e.y,'+15','#34d399');}}}); state.lastAttack=1; } if(!(keys[' ']||keys['Space'])) state.lastAttack=0; }
+    function draw(){ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#020617'; ctx.fillRect(0,0,canvas.width,canvas.height); state.crystals.forEach(c=>{ctx.save(); ctx.translate(c.x+c.size/2,c.y+c.size/2); ctx.scale(1+Math.sin(c.pulse)*0.05,1+Math.sin(c.pulse)*0.05); ctx.fillStyle=c.color; ctx.fillRect(-c.size/2,-c.size/2,c.size,c.size); ctx.restore(); c.pulse+=0.08;}); state.enemies.forEach(e=>{ctx.fillStyle='#ef4444'; ctx.fillRect(e.x,e.y,e.size,e.size);}); ctx.fillStyle='#22c55e'; ctx.fillRect(state.player.x,state.player.y,state.player.size,state.player.size); ctx.fillStyle='#f8fafc'; ctx.font='16px Segoe UI'; ctx.fillText(`HP ${state.player.hp}`,14,24); ctx.fillText(`Gold ${state.player.gold}`,14,44); ctx.fillText(`Score ${state.player.score}`,14,64); state.texts.forEach(t=>{ctx.fillStyle=t.color; ctx.font='bold 14px Segoe UI'; ctx.fillText(t.text,t.x,t.y);}); }
+    function loop(ts){ const dt=Math.min(32,ts-(loop.last||ts)); loop.last=ts; update(dt); draw(); requestAnimationFrame(loop); }
+    document.addEventListener('keydown',e=>{keys[e.key]=true; if(e.key.toLowerCase()==='r'){state.player={x:120,y:120,size:24,hp:100,maxHp:100,gold:0,score:0,attack:12,speed:4.2}; spawnWave();} if(e.key==='Escape') state.paused=!state.paused;}); document.addEventListener('keyup',e=>{keys[e.key]=false;}); for(let i=0;i<6;i++) state.crystals.push(createCrystal()); spawnWave(); setLang('en'); requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+
+# Player System
+
+## Player Attributes
+- HP, Mana, and Stamina
+- Movement speed and dash behavior
+- Attack damage, crit chance, and range
+- Inventory and progression stats
+
+## Progression
+Players gain experience from enemy kills and level up over time. Each level increases survivability and offensive power.
+
+## Equipment and Customization
+- Weapon tiers affect damage and attack cadence
+- Armor influences survivability
+- Skins change visual identity and can be purchased in the shop
+
+# Project Bible
+
+## Vision
+Crystal Hunter RPG is a browser-based action RPG that blends simple arcade combat with light progression systems. The project is designed to be playable immediately in a browser while remaining easy to extend with more content later.
+
+## Core Pillars
+- Fast, readable gameplay loop
+- Strong visual feedback and progression
+- Lightweight implementation with no build step
+- Local persistence for progression and high score
+
+## Current Scope
+- Single-page canvas game
+- Player movement, combat, dash, skill shots, and combo attacks
+- Enemy waves, crystal collection, gold drops, and shop upgrades
+- Boss encounters, dungeon entry, quests, and autosave
+
+## Target Audience
+- Players who enjoy short browser games
+- Developers exploring game systems in plain HTML/CSS/JavaScript
+- Prototype creators who want a playable foundation quickly
+
+## Success Criteria
+- The game opens and runs in a browser without setup beyond loading the page
+- Core loop is clear: move, fight, collect, upgrade, survive
+- The experience feels cohesive and extensible
+
+# QA Checklist
+
+## Functional
+- [ ] Game loads without console errors
+- [ ] Player can move and attack
+- [ ] Enemies spawn and respond to the player
+- [ ] Crystals and gold rewards work
+- [ ] Shop purchases and upgrades function
+- [ ] Save/load works across reloads
+
+## UX
+- [ ] HUD is readable
+- [ ] Menus are easy to dismiss
+- [ ] Controls are discoverable
+
+# Quest System
+
+## Current Implementation
+The game includes a simple quest board with kill, collect, and boss objectives.
+
+## Quest Flow
+- Quests are created at game start.
+- Progress updates when the player completes relevant actions.
+- Completing a quest grants gold and updates the message feed.
+
+## Future Potential
+Add branching quests, story-driven objectives, and reward tiers.
+
+# Crystal Hunter RPG
+
+A browser-based action RPG built in a single HTML file with canvas rendering, progression, combat, crystals, shop, inventory, boss encounters, quests, and autosave.
+
+## Controls
+- Move: WASD or Arrow Keys
+- Attack: Left Click or Space
+- Skill: Right Click or Q
+- Dash: Shift
+- Inventory: I
+- Shop: B
+- Dungeon: E
+- Pause: Esc
+
+## Features
+- Mouse-based combat
+- Mana, stamina, dash, combo attacks, invulnerability frames
+- Weapon tiers from Wood to Dragon
+- Crystal rarity rewards
+- Inventory, shop, and quest log
+- Boss encounters and dungeon entry
+- Local save with autosave every 30 seconds
+
+## Project Documentation
+- [PROJECT_BIBLE.md](PROJECT_BIBLE.md)
+- [GAME_DESIGN_DOCUMENT.md](GAME_DESIGN_DOCUMENT.md)
+- [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md)
+- [AI_SYSTEM.md](AI_SYSTEM.md)
+- [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md)
+- [PLAYER_SYSTEM.md](PLAYER_SYSTEM.md)
+- [ENEMY_SYSTEM.md](ENEMY_SYSTEM.md)
+- [BOSS_SYSTEM.md](BOSS_SYSTEM.md)
+- [DUNGEON_SYSTEM.md](DUNGEON_SYSTEM.md)
+- [ITEM_SYSTEM.md](ITEM_SYSTEM.md)
+- [QUEST_SYSTEM.md](QUEST_SYSTEM.md)
+- [SHOP_SYSTEM.md](SHOP_SYSTEM.md)
+- [UI_UX_GUIDE.md](UI_UX_GUIDE.md)
+- [ART_GUIDE.md](ART_GUIDE.md)
+- [SOUND_GUIDE.md](SOUND_GUIDE.md)
+- [CODING_STANDARD.md](CODING_STANDARD.md)
+- [INSTALL.md](INSTALL.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [ROADMAP.md](ROADMAP.md)
+- [TODO.md](TODO.md)
+- [QA_CHECKLIST.md](QA_CHECKLIST.md)
+- [BUG_REPORT.md](BUG_REPORT.md)
+- [PERFORMANCE.md](PERFORMANCE.md)
+- [SECURITY.md](SECURITY.md)
+
+# Roadmap
+
+## Short Term
+- Improve enemy AI with patrol and retreat logic
+- Add a visible quest log panel
+- Expand the dungeon with more room variety
+
+## Medium Term
+- Add more weapons, armor, and passive abilities
+- Introduce richer boss phases and encounter design
+- Polish UI and audio feedback
+
+## Long Term
+- Add a save-slot system and content progression
+- Expand into a larger campaign structure
+- Consider a modular codebase for scaling beyond the prototype
+
+# Security
+
+## Current Considerations
+The game is a client-side prototype and does not include server-side authentication or persistent user data.
+
+## Safety Notes
+- Avoid embedding secrets or private keys in the client.
+- Keep external assets from untrusted sources to a minimum.
+- Treat LocalStorage as non-sensitive and temporary.
+
+# Shop System
+
+## Current Features
+- Upgrade shop for speed, HP, and damage
+- Cosmetic skins for visual variety
+
+## Interaction Model
+The shop is toggled with the shop key and offers quick purchases using in-game gold.
+
+## Expansion Ideas
+Add weapon unlocks, passive upgrades, and rotating stock in future updates.
+
+# Sound Guide
+
+## Current Audio
+The game uses Web Audio API tones for impacts, projectiles, and UI feedback.
+
+## Sound Goals
+- Make combat and progression feel responsive
+- Use short, distinct tones for key events
+- Preserve clarity even in a browser environment
+
+## Future Expansion
+Replace prototype tones with custom SFX and looping background music.
+
+:root {
+  color-scheme: dark;
+  --bg: #040816;
+  --panel: rgba(8, 15, 32, 0.86);
+  --line: #4f8cff;
+  --text: #f4f7ff;
+  --muted: #91a1c7;
+  --gold: #facc15;
+  --danger: #ef4444;
+  --success: #34d399;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at top, #172554, var(--bg) 70%);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 16px;
+}
+.game-shell {
+  width: min(100vw, 1200px);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 20px;
+  background: rgba(3, 10, 24, 0.74);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(8px);
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0a1226;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+}
+.story-card {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9));
+  border: 1px solid rgba(52, 211, 153, 0.24);
+}
+.story-card h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  color: var(--gold);
+}
+.story-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.hint {
+  margin-top: 4px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.vibe-panel {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(16, 24, 40, 0.95), rgba(30, 41, 59, 0.86));
+  border: 1px solid rgba(250, 204, 21, 0.24);
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px 2px;
+}
+.topbar h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.status-pill {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  font-size: 0.9rem;
+}
+.vibe-panel h2 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  color: var(--gold);
+}
+.vibe-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.vibe-grid article {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(129, 140, 248, 0.22);
+}
+.vibe-grid img {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.vibe-grid h3 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.vibe-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+@media (max-width: 800px) {
+  body { overflow: auto; padding: 8px; }
+  .topbar { flex-direction: column; align-items: flex-start; }
+  .vibe-grid { grid-template-columns: 1fr; }
+}
+
+# Technical Specification
+
+## Stack
+- HTML5
+- CSS3
+- Vanilla JavaScript
+- Canvas API
+- LocalStorage for persistence
+
+## Architecture
+The game is implemented in a single HTML file with inline JavaScript for rapid iteration. Core systems are organized as functions that manage player state, enemies, particles, projectiles, UI, audio, and persistence.
+
+## Runtime Model
+- The main loop uses requestAnimationFrame.
+- World updates run each frame using a delta-time value.
+- Rendering is handled directly on the canvas context.
+
+## Persistence
+- Save data is stored in browser LocalStorage under a dedicated key.
+- Autosave happens every 30 seconds and on important events.
+
+## Performance Notes
+- Object pools are not used yet; the project favors simplicity.
+- Particle and effect counts should remain bounded for browser performance.
+
+# TODO
+
+- Add richer enemy patrol and return states
+- Add a dedicated boss health bar overlay and phase transitions
+- Add a visual quest log panel
+- Add richer shop interactions and weapon selection
+- Add optional audio asset replacements for polished SFX/BGM
+
+# UI/UX Guide
+
+## Goals
+- Keep the HUD readable at a glance
+- Make the core loop obvious to first-time players
+- Use clear color and contrast for health, mana, and progression
+
+## Current Interface
+- Top header with title and status pill
+- Central canvas game area
+- HUD overlay with HP, mana, stamina, level, and gold
+- Inventory and shop panels
+
+## UX Recommendations
+- Maintain one primary action per screen
+- Keep menus lightweight and dismissible
+- Make feedback text visible and readable
