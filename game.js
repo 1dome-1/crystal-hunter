@@ -1,0 +1,980 @@
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const STORAGE_KEY = "crystal-hunter-rpg-v2";
+const RARITY_DATA = [
+  { name: "common", label: "Common", color: "#38bdf8", value: 8, glow: "rgba(56,189,248,0.35)" },
+  { name: "rare", label: "Rare", color: "#4ade80", value: 16, glow: "rgba(74,222,128,0.35)" },
+  { name: "epic", label: "Epic", color: "#a855f7", value: 32, glow: "rgba(168,85,247,0.35)" },
+  { name: "legendary", label: "Legendary", color: "#facc15", value: 60, glow: "rgba(250,204,21,0.35)" },
+  { name: "mythic", label: "Mythic", color: "#fb7185", value: 100, glow: "rgba(251,113,133,0.35)" }
+];
+const WEAPONS = [
+  { name: "Wood Sword", tier: "Common", damage: 12, speed: 0.9, crit: 0.08 },
+  { name: "Iron Sword", tier: "Rare", damage: 15, speed: 1.05, crit: 0.1 },
+  { name: "Steel Sword", tier: "Epic", damage: 19, speed: 1.15, crit: 0.12 },
+  { name: "Crystal Sword", tier: "Legendary", damage: 24, speed: 1.25, crit: 0.15 },
+  { name: "Dragon Sword", tier: "Mythic", damage: 30, speed: 1.35, crit: 0.18 }
+];
+const SKINS = [
+  { id: "default", label: "Default", color: "#22c55e", cost: 0 },
+  { id: "emerald", label: "Emerald", color: "#34d399", cost: 120 },
+  { id: "ruby", label: "Ruby", color: "#fb7185", cost: 180 },
+  { id: "gold", label: "Gold", color: "#fbbf24", cost: 260 }
+];
+
+const keyState = {};
+const pointerState = { up: false, down: false, left: false, right: false, attack: false };
+const mouse = { x: 0, y: 0 };
+let lastTime = 0;
+let audioCtx = null;
+let musicGain = null;
+let musicOsc = null;
+
+function createPlayer() {
+  return {
+    x: 140,
+    y: 140,
+    size: 24,
+    speed: 4.2,
+    hp: 110,
+    maxHp: 110,
+    mana: 60,
+    maxMana: 60,
+    stamina: 100,
+    maxStamina: 100,
+    level: 1,
+    exp: 0,
+    expToNext: 100,
+    gold: 0,
+    score: 0,
+    attackDamage: 12,
+    attackRange: 84,
+    attackCooldown: 0,
+    attackCombo: 0,
+    dashCooldown: 0,
+    dashTimer: 0,
+    invincible: 0,
+    critChance: 0.08,
+    critDamage: 1.8,
+    defense: 0,
+    skin: "default",
+    weapon: { name: "Wood Sword", damage: 12, speed: 0.9, crit: 0.08 },
+    armor: { name: "Leather Armor", defense: 0 },
+    inventory: { common: 0, rare: 0, epic: 0, legendary: 0, mythic: 0, potion: 0, manaPotion: 0 },
+    upgrades: { hp: 0, speed: 0, damage: 0, armor: 0 },
+    skills: { blast: 0, dash: 0, shield: 0 },
+    stats: { crystals: 0, enemiesKilled: 0, damageDealt: 0, wavesCleared: 0, bossDefeats: 0, dungeonFloors: 0 },
+    achievements: { firstCrystal: false, firstWave: false, bossDefeated: false, dungeonClear: false },
+    questLog: []
+  };
+}
+
+function createDefaultState() {
+  return {
+    player: createPlayer(),
+    enemies: [],
+    crystals: [],
+    particles: [],
+    floatingTexts: [],
+    effects: [],
+    quests: [],
+    boss: null,
+    paused: false,
+    showShop: false,
+    showInventory: false,
+    mode: "arena",
+    wave: 1,
+    waveActive: false,
+    waveTimer: 0,
+    screenShake: 0,
+    hitFlash: 0,
+    dungeon: null,
+    highScore: 0,
+    lastSavedAt: 0,
+    autoSaveTimer: 30,
+    message: "A new adventure begins"
+  };
+}
+
+function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return createDefaultState();
+    const parsed = JSON.parse(raw);
+    const next = createDefaultState();
+    if (parsed.player) {
+      next.player = { ...next.player, ...parsed.player };
+      next.player.inventory = { ...next.player.inventory, ...(parsed.player.inventory || {}) };
+      next.player.upgrades = { ...next.player.upgrades, ...(parsed.player.upgrades || {}) };
+      next.player.skills = { ...next.player.skills, ...(parsed.player.skills || {}) };
+      next.player.stats = { ...next.player.stats, ...(parsed.player.stats || {}) };
+      next.player.achievements = { ...next.player.achievements, ...(parsed.player.achievements || {}) };
+      next.player.weapon = { ...next.player.weapon, ...(parsed.player.weapon || {}) };
+      next.player.armor = { ...next.player.armor, ...(parsed.player.armor || {}) };
+      next.player.questLog = Array.isArray(parsed.player.questLog) ? parsed.player.questLog : [];
+      next.player.attackDamage = next.player.weapon.damage;
+    }
+    next.wave = parsed.wave || 1;
+    next.mode = parsed.mode || "arena";
+    next.paused = Boolean(parsed.paused);
+    next.showShop = Boolean(parsed.showShop);
+    next.showInventory = Boolean(parsed.showInventory);
+    next.waveActive = Boolean(parsed.waveActive);
+    next.dungeon = parsed.dungeon || null;
+    next.boss = parsed.boss || null;
+    next.highScore = Number(parsed.highScore || localStorage.getItem("crystal-hunter-highscore") || 0);
+    next.quests = Array.isArray(parsed.quests) ? parsed.quests : createQuests();
+    next.message = parsed.message || "New adventure started";
+    return next;
+  } catch (error) {
+    console.warn("Save load failed", error);
+    return createDefaultState();
+  }
+}
+
+const state = loadState();
+
+function saveState() {
+  const payload = {
+    player: state.player,
+    wave: state.wave,
+    mode: state.mode,
+    paused: state.paused,
+    showShop: state.showShop,
+    showInventory: state.showInventory,
+    waveActive: state.waveActive,
+    dungeon: state.dungeon,
+    boss: state.boss,
+    highScore: state.highScore,
+    quests: state.quests,
+    message: state.message,
+    lastSavedAt: Date.now()
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  localStorage.setItem("crystal-hunter-highscore", String(state.highScore));
+  state.lastSavedAt = Date.now();
+}
+
+function createQuests() {
+  return [
+    { id: 1, type: "kill", title: "Clear the Hollow", target: 8, progress: 0, reward: 80, complete: false },
+    { id: 2, type: "collect", title: "Gather Crystals", target: 5, progress: 0, reward: 60, complete: false },
+    { id: 3, type: "boss", title: "Defeat the Warden", target: 1, progress: 0, reward: 120, complete: false }
+  ];
+}
+
+function resetRun() {
+  const fresh = createDefaultState();
+  fresh.highScore = state.highScore;
+  fresh.quests = createQuests();
+  Object.assign(state, fresh);
+  state.highScore = fresh.highScore;
+  state.quests = fresh.quests;
+  state.player.score = 0;
+  state.player.gold = 0;
+  state.player.attackDamage = state.player.weapon.damage;
+  spawnWave();
+  saveState();
+}
+
+function createCrystal() {
+  const roll = Math.random();
+  let rarity;
+  if (roll < 0.5) rarity = RARITY_DATA[0];
+  else if (roll < 0.8) rarity = RARITY_DATA[1];
+  else if (roll < 0.94) rarity = RARITY_DATA[2];
+  else if (roll < 0.985) rarity = RARITY_DATA[3];
+  else rarity = RARITY_DATA[4];
+  return {
+    x: randomRange(50, canvas.width - 50),
+    y: randomRange(70, canvas.height - 70),
+    size: 16,
+    rarity,
+    pulse: randomRange(0, Math.PI * 2)
+  };
+}
+
+function createEnemy(kind = "normal") {
+  const maxHp = kind === "elite" ? 70 + state.wave * 8 : kind === "boss" ? 260 + state.wave * 25 : 40 + state.wave * 5;
+  const speed = kind === "elite" ? 2.4 + state.wave * 0.02 : kind === "boss" ? 1.4 : 1.8 + state.wave * 0.02;
+  const damage = kind === "elite" ? 8 + state.wave : kind === "boss" ? 16 + state.wave : 5 + Math.floor(state.wave / 2);
+  return {
+    x: randomRange(60, canvas.width - 60),
+    y: randomRange(90, canvas.height - 90),
+    size: kind === "boss" ? 42 : kind === "elite" ? 32 : 24,
+    speed,
+    hp: maxHp,
+    maxHp,
+    damage,
+    cooldown: 950,
+    lastHit: 0,
+    flash: 0,
+    alive: true,
+    kind,
+    state: "idle",
+    aggroRange: kind === "boss" ? 240 : 160,
+    attackRange: kind === "boss" ? 70 : 48,
+    wanderAngle: randomRange(0, Math.PI * 2),
+    wanderTimer: randomRange(0.6, 1.8)
+  };
+}
+
+function spawnWave() {
+  state.enemies = [];
+  const count = Math.min(16, 4 + Math.floor(state.wave * 1.9) + (state.wave % 5 === 0 ? 2 : 0));
+  const bossWave = state.wave % 5 === 0;
+  for (let i = 0; i < count; i++) {
+    const kind = bossWave && i === 0 ? "boss" : i % 7 === 0 ? "elite" : "normal";
+    state.enemies.push(createEnemy(kind));
+  }
+  state.waveActive = true;
+  state.waveTimer = 0;
+  addFloatingText(canvas.width / 2 - 80, 70, `Wave ${state.wave}`, "#fbbf24", 120);
+  playTone(660, 0.08, "triangle", 0.08);
+  saveState();
+}
+
+function addFloatingText(x, y, text, color, life = 80) {
+  state.floatingTexts.push({ x, y, text, color, life, vy: -0.7 });
+}
+
+function spawnParticles(x, y, color, count = 16) {
+  for (let i = 0; i < count; i++) {
+    state.particles.push({ x, y, vx: randomRange(-2.8, 2.8), vy: randomRange(-2.8, 2.8), life: 36, color });
+  }
+}
+
+function playTone(frequency, duration, type = "sine", volume = 0.04) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(frequency, now);
+  gain.gain.setValueAtTime(volume, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + duration);
+}
+
+function startMusic() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (musicGain) return;
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.01;
+  musicGain.connect(audioCtx.destination);
+  musicOsc = audioCtx.createOscillator();
+  musicOsc.type = "sine";
+  musicOsc.frequency.value = 220;
+  musicOsc.connect(musicGain);
+  musicOsc.start();
+}
+
+function getAimDirection() {
+  const px = state.player.x + state.player.size / 2;
+  const py = state.player.y + state.player.size / 2;
+  const dx = mouse.x - px;
+  const dy = mouse.y - py;
+  const dist = Math.hypot(dx, dy) || 1;
+  return { x: dx / dist, y: dy / dist };
+}
+
+function applyDamage(enemy, amount) {
+  enemy.hp -= amount;
+  enemy.flash = 0.2;
+  addFloatingText(enemy.x + 4, enemy.y - 4, `${Math.round(amount)}`, "#fda4af", 65);
+  if (enemy.hp <= 0) killEnemy(enemy);
+}
+
+function performAttack() {
+  if (state.paused || state.player.attackCooldown > 0) return;
+  state.player.attackCooldown = 240 - Math.min(80, state.player.level * 6);
+  const aim = getAimDirection();
+  const comboBonus = state.player.attackCombo % 3 === 0 ? 1.15 : 1;
+  state.player.attackCombo = (state.player.attackCombo + 1) % 4;
+  let damage = state.player.attackDamage * comboBonus;
+  const crit = Math.random() < state.player.critChance;
+  if (crit) damage *= state.player.critDamage;
+  state.player.stats.damageDealt += damage;
+  spawnParticles(state.player.x + 10, state.player.y + 10, crit ? "#fbbf24" : "#f8fafc", 10);
+  playTone(crit ? 1200 : 900, 0.05, "square", 0.06);
+  state.effects.push({ x: state.player.x + 4, y: state.player.y + 4, life: 10, color: crit ? "#fde68a" : "#e2e8f0" });
+  state.enemies.forEach((enemy) => {
+    const ex = enemy.x + enemy.size / 2;
+    const ey = enemy.y + enemy.size / 2;
+    const dx = ex - (state.player.x + state.player.size / 2 + aim.x * 20);
+    const dy = ey - (state.player.y + state.player.size / 2 + aim.y * 20);
+    const dist = Math.hypot(dx, dy);
+    if (dist < state.player.attackRange + enemy.size / 2) {
+      applyDamage(enemy, damage);
+    }
+  });
+  state.hitFlash = 0.14;
+  state.screenShake = 0.16;
+  saveState();
+}
+
+function performSkill() {
+  if (state.paused || state.player.mana < 14) return;
+  state.player.mana = Math.max(0, state.player.mana - 14);
+  const damage = 20 + state.player.level * 3 + state.player.skills.blast * 6;
+  const aim = getAimDirection();
+  state.effects.push({ x: state.player.x - 10, y: state.player.y - 10, life: 18, color: "#38bdf8" });
+  spawnParticles(state.player.x + 10, state.player.y + 10, "#38bdf8", 24);
+  state.enemies.forEach((enemy) => {
+    const dx = enemy.x + enemy.size / 2 - (state.player.x + state.player.size / 2 + aim.x * 40);
+    const dy = enemy.y + enemy.size / 2 - (state.player.y + state.player.size / 2 + aim.y * 40);
+    const dist = Math.hypot(dx, dy);
+    if (dist < 140 + state.player.level * 8) {
+      applyDamage(enemy, damage);
+    }
+  });
+  playTone(540, 0.08, "triangle", 0.08);
+  saveState();
+}
+
+function levelUp() {
+  state.player.level += 1;
+  state.player.exp = 0;
+  state.player.expToNext = Math.round(state.player.expToNext * 1.18);
+  state.player.maxHp += 10;
+  state.player.maxMana += 8;
+  state.player.maxStamina += 8;
+  state.player.hp = state.player.maxHp;
+  state.player.mana = state.player.maxMana;
+  state.player.stamina = state.player.maxStamina;
+  state.player.attackDamage += 2;
+  state.player.weapon.damage = state.player.attackDamage;
+  state.player.upgrades.hp += 1;
+  addFloatingText(110, 132, `Level ${state.player.level}`, "#fbbf24", 110);
+  spawnParticles(120, 120, "#fbbf24", 40);
+  playTone(740, 0.12, "triangle", 0.08);
+  saveState();
+}
+
+function killEnemy(enemy) {
+  enemy.alive = false;
+  state.player.stats.enemiesKilled += 1;
+  state.player.stats.crystals += 1;
+  state.player.gold += 10 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 60 : 0);
+  state.player.score += 25 + (enemy.kind === "elite" ? 40 : 0) + (enemy.kind === "boss" ? 140 : 0);
+  state.player.exp += 18 + (enemy.kind === "elite" ? 24 : 0) + (enemy.kind === "boss" ? 45 : 0);
+  if (state.player.exp >= state.player.expToNext) levelUp();
+  spawnParticles(enemy.x, enemy.y, enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#22c55e", enemy.kind === "boss" ? 48 : 18);
+  addFloatingText(enemy.x, enemy.y - 10, `+${10 + (enemy.kind === "elite" ? 20 : 0) + (enemy.kind === "boss" ? 60 : 0)} Gold`, "#facc15", 70);
+  if (enemy.kind === "boss") {
+    state.player.achievements.bossDefeated = true;
+    state.player.stats.bossDefeats += 1;
+    state.message = "The Warden has fallen";
+    addFloatingText(140, 160, "Boss Defeated", "#fbbf24", 120);
+  }
+  updateQuests(enemy.kind === "boss" ? "boss" : "kill");
+}
+
+function updateQuests(type) {
+  state.quests.forEach((quest) => {
+    if (quest.complete) return;
+    if (type === "kill" && quest.type === "kill") {
+      quest.progress += 1;
+    } else if (type === "collect" && quest.type === "collect") {
+      quest.progress += 1;
+    } else if (type === "boss" && quest.type === "boss") {
+      quest.progress += 1;
+    }
+    if (quest.progress >= quest.target) {
+      quest.complete = true;
+      state.player.gold += quest.reward;
+      state.message = `${quest.title} complete`;
+      addFloatingText(140, 190, `${quest.title} Complete`, "#34d399", 110);
+    }
+  });
+}
+
+function handleInput(delta) {
+  const moveX = (keyState["arrowright"] || keyState["d"] || pointerState.right ? 1 : 0) - (keyState["arrowleft"] || keyState["a"] || pointerState.left ? 1 : 0);
+  const moveY = (keyState["arrowdown"] || keyState["s"] || pointerState.down ? 1 : 0) - (keyState["arrowup"] || keyState["w"] || pointerState.up ? 1 : 0);
+  const len = Math.hypot(moveX, moveY) || 1;
+  const inputVector = { x: moveX / len, y: moveY / len };
+  if (moveX || moveY) {
+    const speedFactor = keyState["shift"] && state.player.stamina > 10 ? 1.5 : 1;
+    if (keyState["shift"] && state.player.stamina > 10) {
+      state.player.stamina = Math.max(0, state.player.stamina - 8);
+    } else {
+      state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.35);
+    }
+    state.player.x += inputVector.x * state.player.speed * speedFactor;
+    state.player.y += inputVector.y * state.player.speed * speedFactor;
+  } else {
+    state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 0.45);
+  }
+  state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);
+  state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);
+  state.player.attackCooldown = Math.max(0, state.player.attackCooldown - delta * 0.001);
+  state.player.dashCooldown = Math.max(0, state.player.dashCooldown - delta * 0.001);
+  state.player.invincible = Math.max(0, state.player.invincible - delta * 0.001);
+  state.hitFlash = Math.max(0, state.hitFlash - delta * 0.001);
+  state.screenShake = Math.max(0, state.screenShake - delta * 0.001);
+  if (keyState["shift"] && state.player.dashCooldown <= 0 && (moveX || moveY) && !state.paused) {
+    state.player.dashCooldown = 700;
+    state.player.dashTimer = 110;
+    state.player.speed = 5.8;
+    state.player.skills.dash += 1;
+    playTone(600, 0.04, "square", 0.05);
+    addFloatingText(state.player.x, state.player.y - 8, "Dash", "#fbbf24", 50);
+  }
+  if (state.player.dashTimer > 0) {
+    state.player.dashTimer -= delta;
+    if (state.player.dashTimer <= 0) state.player.speed = 4.2;
+  }
+  if ((keyState[" "] || keyState["space"] || pointerState.attack) && !state.paused) performAttack();
+  if (keyState["e"] && !state.paused) enterDungeon();
+}
+
+function updateParticles(delta) {
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= delta * 0.06;
+    if (p.life <= 0) state.particles.splice(i, 1);
+  }
+}
+
+function updateFloatingTexts(delta) {
+  for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+    const t = state.floatingTexts[i];
+    t.y += t.vy * delta * 0.06;
+    t.life -= delta;
+    if (t.life <= 0) state.floatingTexts.splice(i, 1);
+  }
+}
+
+function updateEffects(delta) {
+  for (let i = state.effects.length - 1; i >= 0; i--) {
+    const effect = state.effects[i];
+    effect.life -= delta * 0.06;
+    if (effect.life <= 0) state.effects.splice(i, 1);
+  }
+}
+
+function updateCrystals() {
+  for (let i = state.crystals.length - 1; i >= 0; i--) {
+    const crystal = state.crystals[i];
+    crystal.pulse += 0.08;
+    const dx = state.player.x + state.player.size / 2 - (crystal.x + crystal.size / 2);
+    const dy = state.player.y + state.player.size / 2 - (crystal.y + crystal.size / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist < state.player.size / 2 + crystal.size / 2) {
+      const reward = crystal.rarity.value;
+      state.player.gold += reward;
+      state.player.score += reward;
+      state.player.inventory[crystal.rarity.name] += 1;
+      state.player.stats.crystals += 1;
+      state.player.achievements.firstCrystal = true;
+      updateQuests("collect");
+      addFloatingText(crystal.x, crystal.y - 6, `+${reward} Gold`, crystal.rarity.color, 70);
+      spawnParticles(crystal.x, crystal.y, crystal.rarity.color, 20);
+      playTone(580, 0.06, "triangle", 0.05);
+      state.crystals.splice(i, 1);
+      state.crystals.push(createCrystal());
+      saveState();
+    }
+  }
+}
+
+function updateEnemyAI(enemy, delta) {
+  const px = state.player.x + state.player.size / 2;
+  const py = state.player.y + state.player.size / 2;
+  const ex = enemy.x + enemy.size / 2;
+  const ey = enemy.y + enemy.size / 2;
+  const dist = Math.hypot(px - ex, py - ey);
+  const shouldChase = enemy.kind === "boss" ? dist < enemy.aggroRange : dist < enemy.aggroRange - 30 + state.wave * 8;
+  enemy.state = shouldChase ? "chase" : "wander";
+  if (enemy.state === "chase") {
+    const dx = px - ex;
+    const dy = py - ey;
+    const length = Math.hypot(dx, dy) || 1;
+    const chaseSpeed = enemy.speed + (enemy.kind === "boss" ? 0.15 : 0.08) + state.wave * 0.01;
+    enemy.x += (dx / length) * chaseSpeed;
+    enemy.y += (dy / length) * chaseSpeed;
+  } else {
+    enemy.wanderTimer -= delta * 0.001;
+    if (enemy.wanderTimer <= 0) {
+      enemy.wanderTimer = randomRange(0.6, 1.8);
+      enemy.wanderAngle += randomRange(-0.9, 0.9);
+    }
+    enemy.x += Math.cos(enemy.wanderAngle) * (enemy.speed * 0.55);
+    enemy.y += Math.sin(enemy.wanderAngle) * (enemy.speed * 0.55);
+  }
+  const hitDist = Math.hypot(state.player.x - enemy.x, state.player.y - enemy.y);
+  if (hitDist < state.player.size / 2 + enemy.size / 2 && performance.now() - enemy.lastHit >= enemy.cooldown) {
+    const damage = Math.max(4, enemy.damage - state.player.armor.defense - state.player.upgrades.armor * 1.4);
+    state.player.hp -= damage;
+    state.player.invincible = 180;
+    enemy.lastHit = performance.now();
+    addFloatingText(state.player.x + 4, state.player.y - 6, `-${Math.round(damage)}`, "#f87171", 55);
+    playTone(220, 0.04, "sine", 0.05);
+    state.hitFlash = 0.2;
+    state.screenShake = 0.14;
+    if (state.player.hp <= 0) gameOver();
+  }
+}
+
+function updateEnemies(delta) {
+  for (let i = state.enemies.length - 1; i >= 0; i--) {
+    const enemy = state.enemies[i];
+    if (!enemy.alive) {
+      state.enemies.splice(i, 1);
+      continue;
+    }
+    enemy.flash = Math.max(0, enemy.flash - delta * 0.001);
+    updateEnemyAI(enemy, delta);
+  }
+}
+
+function updateWave(delta) {
+  if (!state.waveActive) {
+    state.waveTimer -= delta * 0.001;
+    if (state.waveTimer <= 0) {
+      state.wave += 1;
+      state.player.stats.wavesCleared += 1;
+      state.player.achievements.firstWave = true;
+      state.player.gold += 20;
+      spawnWave();
+    }
+  } else if (state.enemies.length === 0) {
+    state.waveActive = false;
+    state.waveTimer = 1.6;
+    state.player.gold += 30 + state.wave * 6;
+    state.player.score += 90 + state.wave * 10;
+    state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+    state.player.mana = Math.min(state.player.maxMana, state.player.mana + 6);
+    addFloatingText(110, 92, `Wave Clear +${30 + state.wave * 6} Gold`, "#34d399", 100);
+    playTone(880, 0.12, "square", 0.08);
+    saveState();
+  }
+}
+
+function createSecretChest() {
+  return {
+    x: randomRange(90, canvas.width - 110),
+    y: randomRange(90, canvas.height - 110),
+    size: 24,
+    gold: 180 + state.wave * 40,
+    active: true,
+    pulse: randomRange(0, Math.PI * 2)
+  };
+}
+
+function enterDungeon() {
+  if (state.mode === "dungeon") return;
+  state.mode = "dungeon";
+  state.dungeon = { floor: 1 + state.player.level, rooms: [{ x: 1, y: 1, w: 2, h: 2 }], progress: 0, chest: createSecretChest() };
+  state.player.stats.dungeonFloors += 1;
+  state.player.achievements.dungeonClear = true;
+  state.message = "Dungeon entered";
+  addFloatingText(120, 220, "Entered Dungeon", "#fbbf24", 100);
+  saveState();
+}
+
+function update(delta) {
+  if (state.paused || state.showShop || state.showInventory) return;
+  handleInput(delta);
+  updateParticles(delta);
+  updateFloatingTexts(delta);
+  updateEffects(delta);
+  updateCrystals();
+  updateEnemies(delta);
+  updateWave(delta);
+  if (state.mode === "dungeon") updateDungeon(delta);
+  if (state.player.hp <= 0) gameOver();
+  state.autoSaveTimer -= delta * 0.001;
+  if (state.autoSaveTimer <= 0) {
+    saveState();
+    state.autoSaveTimer = 30;
+  }
+}
+
+function gameOver() {
+  state.highScore = Math.max(state.highScore, state.player.score);
+  saveState();
+  playTone(180, 0.2, "sawtooth", 0.08);
+  alert("You fell in battle. The run is over. Press OK to start again.");
+  resetRun();
+}
+
+function buyUpgrade(id) {
+  const costs = { hp: 100, speed: 100, damage: 100, armor: 120, potion: 50, manaPotion: 50, weapon: 140, shield: 160 };
+  if (state.player.gold < costs[id]) return;
+  state.player.gold -= costs[id];
+  if (id === "hp") {
+    state.player.maxHp += 14;
+    state.player.hp = state.player.maxHp;
+    state.player.upgrades.hp += 1;
+  } else if (id === "speed") {
+    state.player.speed += 0.8;
+    state.player.upgrades.speed += 1;
+  } else if (id === "damage") {
+    state.player.attackDamage += 3;
+    state.player.weapon.damage = state.player.attackDamage;
+    state.player.upgrades.damage += 1;
+  } else if (id === "armor") {
+    state.player.armor.defense += 2;
+    state.player.upgrades.armor += 1;
+  } else if (id === "potion") {
+    state.player.inventory.potion += 1;
+  } else if (id === "manaPotion") {
+    state.player.inventory.manaPotion += 1;
+  } else if (id === "weapon") {
+    const weapon = WEAPONS.find((item) => item.name === "Crystal Sword");
+    state.player.weapon = { name: weapon.name, damage: weapon.damage, speed: weapon.speed, crit: weapon.crit };
+    state.player.attackDamage = state.player.weapon.damage;
+    state.player.critChance = Math.max(state.player.critChance, weapon.crit);
+  } else if (id === "shield") {
+    state.player.skills.shield += 1;
+    state.player.armor.defense += 3;
+  }
+  playTone(520, 0.06, "triangle", 0.06);
+  saveState();
+}
+
+function usePotion(type) {
+  if (type === "potion" && state.player.inventory.potion > 0) {
+    state.player.inventory.potion -= 1;
+    state.player.hp = Math.min(state.player.maxHp, state.player.hp + 24);
+  }
+  if (type === "manaPotion" && state.player.inventory.manaPotion > 0) {
+    state.player.inventory.manaPotion -= 1;
+    state.player.mana = Math.min(state.player.maxMana, state.player.mana + 20);
+  }
+  saveState();
+}
+
+function toggleShop() {
+  state.showShop = !state.showShop;
+  state.paused = false;
+  saveState();
+}
+
+function toggleInventory() {
+  state.showInventory = !state.showInventory;
+  saveState();
+}
+
+function togglePause() {
+  state.paused = !state.paused;
+  saveState();
+}
+
+function updateDungeon(delta) {
+  if (!state.dungeon) return;
+  state.dungeon.progress += delta * 0.001;
+  if (state.dungeon.chest && state.dungeon.chest.active) {
+    state.dungeon.chest.pulse += 0.08;
+    const dx = state.player.x + state.player.size / 2 - (state.dungeon.chest.x + state.dungeon.chest.size / 2);
+    const dy = state.player.y + state.player.size / 2 - (state.dungeon.chest.y + state.dungeon.chest.size / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist < state.player.size / 2 + state.dungeon.chest.size / 2) {
+      state.player.gold += state.dungeon.chest.gold;
+      state.player.score += state.dungeon.chest.gold;
+      state.message = "Secret chest found";
+      addFloatingText(state.dungeon.chest.x, state.dungeon.chest.y - 8, `+${state.dungeon.chest.gold} Gold`, "#facc15", 90);
+      spawnParticles(state.dungeon.chest.x, state.dungeon.chest.y, "#facc15", 24);
+      state.dungeon.chest.active = false;
+      saveState();
+    }
+  }
+  if (state.dungeon.progress > 7) {
+    state.player.level += 1;
+    state.player.gold += 80;
+    state.player.score += 180;
+    state.player.stats.dungeonFloors += 1;
+    addFloatingText(120, 250, "Dungeon Cleared", "#fbbf24", 110);
+    state.mode = "arena";
+    state.dungeon = null;
+    saveState();
+  }
+}
+
+function drawBackground() {
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#030712");
+  gradient.addColorStop(1, "#111827");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < 40; i++) {
+    const x = (i * 97 + state.wave * 3) % canvas.width;
+    const y = (i * 67 + state.wave * 5) % canvas.height;
+    ctx.fillStyle = i % 4 === 0 ? "rgba(255,255,255,0.15)" : "rgba(56,189,248,0.12)";
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
+
+function drawHud() {
+  const player = state.player;
+  const hpRatio = player.hp / player.maxHp;
+  const manaRatio = player.mana / player.maxMana;
+  const expRatio = player.exp / player.expToNext;
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+  ctx.fillRect(12, 12, 430, 170);
+  ctx.strokeStyle = "#38bdf8";
+  ctx.strokeRect(12, 12, 430, 170);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 16px Segoe UI";
+  ctx.fillText(`HP ${Math.floor(player.hp)} / ${Math.floor(player.maxHp)}`, 24, 40);
+  ctx.fillText(`Mana ${Math.floor(player.mana)} / ${Math.floor(player.maxMana)}`, 24, 64);
+  ctx.fillText(`Stamina ${Math.floor(player.stamina)} / ${Math.floor(player.maxStamina)}`, 24, 88);
+  ctx.fillText(`Level ${player.level}`, 24, 112);
+  ctx.fillText(`EXP ${player.exp} / ${player.expToNext}`, 24, 136);
+  ctx.fillText(`Gold ${player.gold} • Wave ${state.wave}`, 24, 160);
+  ctx.fillStyle = "#334155";
+  ctx.fillRect(170, 36, 240, 12);
+  ctx.fillStyle = "#ef4444";
+  ctx.fillRect(170, 36, 240 * hpRatio, 12);
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillRect(170, 56, 240 * expRatio, 8);
+  ctx.fillStyle = "#f59e0b";
+  ctx.fillRect(170, 74, 240 * manaRatio, 8);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "14px Segoe UI";
+  ctx.fillText(`Weapon: ${player.weapon.name}`, 170, 150);
+  ctx.fillText(`Skin: ${player.skin}`, 170, 168);
+  ctx.restore();
+  if (state.boss) {
+    ctx.save();
+    ctx.fillStyle = "rgba(2, 6, 23, 0.82)";
+    ctx.fillRect(12, 520, 430, 68);
+    ctx.strokeStyle = "#fb923c";
+    ctx.strokeRect(12, 520, 430, 68);
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 14px Segoe UI";
+    ctx.fillText(`Boss: ${state.boss.name}`, 24, 548);
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(24, 556, 400, 10);
+    ctx.fillStyle = "#ef4444";
+    ctx.fillRect(24, 556, 400 * (state.boss.hp / state.boss.maxHp), 10);
+    ctx.restore();
+  }
+}
+
+function drawInventoryPanel() {
+  if (!state.showInventory) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 23, 0.92)";
+  ctx.fillRect(700, 12, 240, 220);
+  ctx.strokeStyle = "#f59e0b";
+  ctx.strokeRect(700, 12, 240, 220);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 16px Segoe UI";
+  ctx.fillText("Inventory", 716, 36);
+  ctx.font = "14px Segoe UI";
+  ctx.fillText(`Crystals: ${state.player.inventory.common} / ${state.player.inventory.rare} / ${state.player.inventory.epic} / ${state.player.inventory.legendary} / ${state.player.inventory.mythic}`, 716, 62);
+  ctx.fillText(`Potions: ${state.player.inventory.potion}`, 716, 86);
+  ctx.fillText(`Mana Potions: ${state.player.inventory.manaPotion}`, 716, 110);
+  ctx.fillText(`Weapon: ${state.player.weapon.name}`, 716, 134);
+  ctx.fillText(`Armor: ${state.player.armor.name}`, 716, 158);
+  ctx.fillText("Use 1 / 2 to consume", 716, 182);
+  ctx.restore();
+}
+
+function drawShopWindow() {
+  if (!state.showShop) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
+  ctx.fillRect(220, 140, 520, 360);
+  ctx.strokeStyle = "#38bdf8";
+  ctx.strokeRect(220, 140, 520, 320);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 24px Segoe UI";
+  ctx.fillText("Shop", 240, 178);
+  ctx.font = "16px Segoe UI";
+  ctx.fillText("1) HP Boost • 100 Gold", 240, 220);
+  ctx.fillText("2) Speed Boost • 100 Gold", 240, 248);
+  ctx.fillText("3) Damage Boost • 100 Gold", 240, 276);
+  ctx.fillText("4) Armor Boost • 120 Gold", 240, 304);
+  ctx.fillText("5) Potion • 50 Gold", 240, 332);
+  ctx.fillText("6) Mana Potion • 50 Gold", 240, 360);
+  ctx.fillText("7) Crystal Sword • 140 Gold", 240, 388);
+  ctx.fillText("8) Default Skin • Free", 240, 416);
+  ctx.fillText("9) Emerald Skin • 120 Gold", 240, 444);
+  ctx.fillText("0) Ruby Skin • 180 Gold", 240, 472);
+  ctx.fillText("- / =) Gold Skin • 260 Gold", 240, 500);
+  ctx.fillText("Press B to close", 240, 528);
+  ctx.restore();
+}
+
+function drawPauseWindow() {
+  if (!state.paused) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+  ctx.fillRect(250, 180, 460, 240);
+  ctx.strokeStyle = "#fbbf24";
+  ctx.strokeRect(250, 180, 460, 240);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 30px Segoe UI";
+  ctx.fillText("Paused", 386, 228);
+  ctx.font = "16px Segoe UI";
+  ctx.fillText("R = Resume", 300, 278);
+  ctx.fillText("S = Save", 300, 306);
+  ctx.fillText("T = Reset", 300, 334);
+  ctx.restore();
+}
+
+function buySkin(id) {
+  const skin = SKINS.find((entry) => entry.id === id);
+  if (!skin) return;
+  if (state.player.gold < skin.cost) return;
+  state.player.gold -= skin.cost;
+  state.player.skin = skin.id;
+  state.message = `${skin.label} skin equipped`;
+  addFloatingText(120, 200, `${skin.label} Skin`, "#fbbf24", 90);
+  playTone(540, 0.05, "triangle", 0.06);
+  saveState();
+}
+
+function drawWorld() {
+  drawBackground();
+  if (state.dungeon?.chest && state.dungeon.chest.active) {
+    const chest = state.dungeon.chest;
+    ctx.save();
+    ctx.translate(chest.x + chest.size / 2, chest.y + chest.size / 2);
+    ctx.scale(1 + Math.sin(chest.pulse) * 0.04, 1 + Math.sin(chest.pulse) * 0.04);
+    ctx.fillStyle = "#facc15";
+    ctx.fillRect(-chest.size / 2, -chest.size / 2, chest.size, chest.size);
+    ctx.fillStyle = "#92400e";
+    ctx.fillRect(-chest.size / 2 + 4, -chest.size / 2 + 10, chest.size - 8, 8);
+    ctx.restore();
+  }
+  state.crystals.forEach((crystal) => {
+    ctx.save();
+    ctx.translate(crystal.x + crystal.size / 2, crystal.y + crystal.size / 2);
+    ctx.scale(1 + Math.sin(crystal.pulse) * 0.05, 1 + Math.sin(crystal.pulse) * 0.05);
+    ctx.fillStyle = crystal.rarity.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, crystal.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = crystal.rarity.glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, crystal.size + 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+  state.enemies.forEach((enemy) => {
+    ctx.save();
+    ctx.translate(enemy.x + enemy.size / 2, enemy.y + enemy.size / 2);
+    ctx.globalAlpha = enemy.flash > 0 ? 0.7 : 1;
+    ctx.fillStyle = enemy.kind === "boss" ? "#fb923c" : enemy.kind === "elite" ? "#fb7185" : "#ef4444";
+    ctx.fillRect(-enemy.size / 2, -enemy.size / 2, enemy.size, enemy.size);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(-enemy.size / 2 + 4, -enemy.size / 2 + 4, enemy.size - 8, 4);
+    ctx.restore();
+  });
+  ctx.fillStyle = state.hitFlash > 0 ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const skin = SKINS.find((entry) => entry.id === state.player.skin) || SKINS[0];
+  ctx.fillStyle = skin.color;
+  ctx.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(state.player.x + 6, state.player.y + 6, 10, 10);
+  state.particles.forEach((p) => {
+    ctx.globalAlpha = Math.max(0, p.life / 36);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, 3, 3);
+  });
+  ctx.globalAlpha = 1;
+  state.effects.forEach((effect) => {
+    ctx.fillStyle = effect.color;
+    ctx.fillRect(effect.x, effect.y, 8, 8);
+  });
+  state.floatingTexts.forEach((t) => {
+    ctx.fillStyle = t.color;
+    ctx.font = "bold 14px Segoe UI";
+    ctx.fillText(t.text, t.x, t.y);
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawWorld();
+  drawHud();
+  drawInventoryPanel();
+  drawShopWindow();
+  drawPauseWindow();
+}
+
+function loop(timestamp) {
+  const delta = Math.min(32, timestamp - lastTime || 16);
+  lastTime = timestamp;
+  update(delta);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
+  keyState[key] = true;
+  if ([" ", "space"].includes(key)) event.preventDefault();
+  if (key === "escape") { event.preventDefault(); togglePause(); }
+  if (key === "b") toggleShop();
+  if (key === "i") toggleInventory();
+  if (key === "r" && state.paused) state.paused = false;
+  if (key === "s" && state.paused) saveState();
+  if (key === "t" && state.paused) resetRun();
+  if (key === "1") buyUpgrade("hp");
+  if (key === "2") buyUpgrade("speed");
+  if (key === "3") buyUpgrade("damage");
+  if (key === "4") buyUpgrade("armor");
+  if (key === "5") buyUpgrade("potion");
+  if (key === "6") buyUpgrade("manaPotion");
+  if (key === "7") buyUpgrade("weapon");
+  if (key === "8") buySkin("default");
+  if (key === "9") buySkin("emerald");
+  if (key === "0") buySkin("ruby");
+  if (key === "-" || key === "=") buySkin("gold");
+  if (key === "1" && state.showInventory) usePotion("potion");
+  if (key === "2" && state.showInventory) usePotion("manaPotion");
+  if (key === "e") enterDungeon();
+  if (key === "q") performSkill();
+});
+
+document.addEventListener("keyup", (event) => {
+  keyState[event.key.toLowerCase()] = false;
+});
+
+canvas.addEventListener("mousemove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  mouse.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+});
+
+canvas.addEventListener("mousedown", (event) => {
+  if (event.button === 0) pointerState.attack = true;
+  if (event.button === 2) {
+    event.preventDefault();
+    performSkill();
+  }
+});
+
+canvas.addEventListener("mouseup", (event) => {
+  if (event.button === 0) pointerState.attack = false;
+});
+
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+window.addEventListener("beforeunload", saveState);
+
+if (!state.crystals.length) {
+  for (let i = 0; i < 6; i++) state.crystals.push(createCrystal());
+}
+if (!state.enemies.length && !state.waveActive) spawnWave();
+if (!state.quests.length) state.quests = createQuests();
+if (state.wave % 5 === 0) state.boss = { name: "Warden", hp: 260, maxHp: 260 };
+startMusic();
+saveState();
+requestAnimationFrame(loop);
